@@ -1,0 +1,15 @@
+# Limine configuration file (x86_64 UEFI, initramfs-free Linux boot)
+#
+# Limine reads FAT12/16/32 (and ISO9660) filesystems only — NOT ext4/xfs/btrfs.
+# boot():/ resolves to the root of the FAT32 partition containing limine.conf.
+# Mount your FAT32 ESP at /boot, or copy vmlinuz-* onto the ESP if mounted at /boot/efi.
+
+timeout: 5
+default_entry: 1
+remember_last_entry: no
+interface_branding: CRUX Linux
+
+/CRUX Linux (6.18.64_1)
+    protocol: linux
+    kernel_path: boot():/vmlinuz-6.18.64_1
+    cmdline: root=/dev/nvme0n1p3 rw quiet loglevel=3
