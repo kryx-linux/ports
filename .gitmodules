@@ -1,0 +1,15 @@
+[submodule "core"]
+	path = core
+	url = https://git.crux.nu/ports/core.git
+[submodule "opt"]
+	path = opt
+	url = https://git.crux.nu/ports/opt.git
+[submodule "contrib"]
+	path = contrib
+	url = https://git.crux.nu/ports/contrib.git
+[submodule "rolling/gports"]
+	path = rolling/gports
+	url = https://github.com/crux-rolling/gports
+[submodule "rolling/linux-6.18"]
+	path = rolling/linux-6.18
+	url = https://github.com/crux-rolling/kernel
