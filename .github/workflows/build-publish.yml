@@ -1,4 +1,4 @@
-name: Build Packages with pe and Publish Rolling Repo
+name: Build Packages with kryx-src and Publish Rolling Repo
 
 on:
   workflow_dispatch:
@@ -14,7 +14,7 @@ on:
         required: true
         default: main
       port_path:
-        description: Space-separated port path(s) to build (e.g. "kernel", "zig", "rolling/gports", "gports", or "all")
+        description: Space-separated port path(s), package name(s), collection(s), or "all" (e.g. "linux-6.18", "kernel", "rolling", or "all")
         type: string
         required: true
         default: kernel
@@ -29,17 +29,22 @@ on:
         required: true
         default: rolling-x86_64
       build_deps:
-        description: Also build recursive Pkgfile dependencies (pe build --deps)
+        description: Also resolve and satisfy recursive Pkgfile dependencies (--deps)
+        type: boolean
+        required: false
+        default: false
+      source_deps:
+        description: Build missing dependencies from source instead of reusing binary index (--source-deps)
         type: boolean
         required: false
         default: false
       ignore_footprint:
-        description: Skip .footprint verification (pe build --ignore-footprint)
+        description: Skip .footprint verification (--ignore-footprint)
         type: boolean
         required: false
         default: false
       ignore_md5sum:
-        description: Skip .md5sum verification (pe build --ignore-md5sum)
+        description: Skip .md5sum verification (--ignore-md5sum)
         type: boolean
         required: false
         default: false
@@ -60,7 +65,7 @@ jobs:
   prepare:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout external port repository (with submodules)
+      - name: Checkout source port repository (with submodules)
         uses: actions/checkout@v4
         with:
           repository: ${{ inputs.port_repo || 'kryx-linux/ports' }}
@@ -78,11 +83,6 @@ jobs:
           if [ "$PKGFILE_COUNT" -eq 0 ]; then
             echo "error: no Pkgfile found in $PORT_REPO" >&2
             ls -la port_src >&2 || true
-            if [ -f port_src/.gitmodules ]; then
-              echo "--- .gitmodules ---" >&2
-              cat port_src/.gitmodules >&2
-            fi
-            find port_src -maxdepth 3 -not -path '*/.git*' >&2 || true
             exit 1
           fi
           tar --exclude='.git' -cf port-src.tar -C port_src .
@@ -107,7 +107,7 @@ jobs:
           name: port-src-bundle
           path: port_bundle
 
-      - name: Verify CRUX container and preinstalled pe tools
+      - name: Verify CRUX container and preinstalled kryx-src / pe tools
         run: |
           set -euo pipefail
           if command -v crux >/dev/null 2>&1; then
@@ -115,44 +115,87 @@ jobs:
           fi
           test -x /usr/bin/pe
           test -x /usr/bin/pe-index
-          test -f /etc/pe.ini
           /usr/bin/pe --version
-          PE_INDEX_HELP="$(/usr/bin/pe-index --help 2>&1 || true)"
-          grep -q "Usage of pe-index" <<< "$PE_INDEX_HELP"
+          if [ -x /usr/bin/kryx-src ]; then
+            /usr/bin/kryx-src --version
+          else
+            echo "warning: /usr/bin/kryx-src not found in container image; rebuild ghcr.io/kryx-linux/image for unified kryx-src support" >&2
+          fi
 
-      - name: Build target port(s) with /usr/bin/pe
+      - name: Build target port(s) with kryx-src
         env:
           PORT_REPO: ${{ inputs.port_repo || 'kryx-linux/ports' }}
           PORT_PATH: ${{ inputs.port_path || 'kernel' }}
           RELEASE_TAG: ${{ inputs.release_tag || 'rolling-x86_64' }}
           BUILD_DEPS: ${{ inputs.build_deps }}
+          SOURCE_DEPS: ${{ inputs.source_deps }}
           IGNORE_FOOTPRINT: ${{ inputs.ignore_footprint }}
           IGNORE_MD5SUM: ${{ inputs.ignore_md5sum }}
         run: |
           set -euo pipefail
-          WORK_ROOT="$RUNNER_TEMP/pe-work"
+          WORK_ROOT="$RUNNER_TEMP/kryx-work"
           OUT_DIR="$GITHUB_WORKSPACE/dist"
           PKG_DIR="$OUT_DIR/packages"
           RAW_PORT_SRC="$WORK_ROOT/port_src"
           rm -rf "$WORK_ROOT" "$OUT_DIR"
-          mkdir -p "$WORK_ROOT/cache" "$WORK_ROOT/sources" "$WORK_ROOT/work" "$RAW_PORT_SRC" "$PKG_DIR" "$OUT_DIR/bin"
+          mkdir -p "$RAW_PORT_SRC" "$PKG_DIR" "$OUT_DIR/bin"
 
           tar -xf "$GITHUB_WORKSPACE/port_bundle/port-src.tar" -C "$RAW_PORT_SRC"
 
-          PORTS_DIR="$RAW_PORT_SRC"
-          ROOT_PORT_NAME=""
-          if [ -f "$RAW_PORT_SRC/Pkgfile" ]; then
-            ROOT_PORT_NAME="$(cd "$RAW_PORT_SRC" && bash -c 'set -e; source ./Pkgfile >/dev/null; printf "%s" "${name:-}"')"
-            if [ -z "$ROOT_PORT_NAME" ]; then
-              ROOT_PORT_NAME="${PORT_REPO##*/}"
-            fi
-            PORTS_DIR="$WORK_ROOT/ports"
-            mkdir -p "$PORTS_DIR/$ROOT_PORT_NAME"
-            cp -a "$RAW_PORT_SRC/." "$PORTS_DIR/$ROOT_PORT_NAME/"
+          read -r -a TARGET_PORTS <<< "$PORT_PATH"
+          if [ "${#TARGET_PORTS[@]}" -eq 0 ]; then
+            echo "error: no target ports specified in port_path" >&2
+            exit 1
           fi
 
-          PE_CONF="$WORK_ROOT/pe.ci.ini"
-          cat > "$PE_CONF" <<EOF
+          if [ -x /usr/bin/kryx-src ]; then
+            echo "=== Lint target port(s) ==="
+            /usr/bin/kryx-src lint --ports "$RAW_PORT_SRC" "${TARGET_PORTS[@]}" || true
+
+            SRC_FLAGS=(
+              --ports "$RAW_PORT_SRC"
+              --port-repo "$PORT_REPO"
+              --work-root "$WORK_ROOT"
+              --out-dir "$PKG_DIR"
+              --repo "$GITHUB_REPOSITORY"
+              --tag "$RELEASE_TAG"
+              --arch x86_64
+              --jobs "$(nproc)"
+              --compression zst
+              --force
+              --color never
+            )
+            if [ "$BUILD_DEPS" = "true" ]; then
+              SRC_FLAGS+=(--deps --sync-index)
+            fi
+            if [ "$SOURCE_DEPS" = "true" ]; then
+              SRC_FLAGS+=(--source-deps)
+            fi
+            if [ "$IGNORE_FOOTPRINT" = "true" ]; then
+              SRC_FLAGS+=(--ignore-footprint)
+            fi
+            if [ "$IGNORE_MD5SUM" = "true" ]; then
+              SRC_FLAGS+=(--ignore-md5sum)
+            fi
+
+            echo "=== Building ports via kryx-src: ${TARGET_PORTS[*]} ==="
+            /usr/bin/kryx-src pkg "${SRC_FLAGS[@]}" "${TARGET_PORTS[@]}"
+            cp -f /usr/bin/kryx-src "$OUT_DIR/bin/kryx-src"
+            chmod 0755 "$OUT_DIR/bin/kryx-src"
+          else
+            # Fallback for older container images prior to kryx-src installation.
+            mkdir -p "$WORK_ROOT/cache" "$WORK_ROOT/sources" "$WORK_ROOT/work"
+            PORTS_DIR="$RAW_PORT_SRC"
+            if [ -f "$RAW_PORT_SRC/Pkgfile" ]; then
+              ROOT_PORT_NAME="$(cd "$RAW_PORT_SRC" && bash -c 'set -e; source ./Pkgfile >/dev/null; printf "%s" "${name:-}"')"
+              ROOT_PORT_NAME="${ROOT_PORT_NAME:-${PORT_REPO##*/}}"
+              PORTS_DIR="$WORK_ROOT/ports"
+              mkdir -p "$PORTS_DIR/$ROOT_PORT_NAME"
+              cp -a "$RAW_PORT_SRC/." "$PORTS_DIR/$ROOT_PORT_NAME/"
+              TARGET_PORTS=("$ROOT_PORT_NAME")
+            fi
+            PE_CONF="$WORK_ROOT/pe.ci.ini"
+            cat > "$PE_CONF" <<EOF
           [paths]
           root = /
           ports_dir = $PORTS_DIR
@@ -186,63 +229,18 @@ jobs:
           [ui]
           color = never
           EOF
-
-          BUILD_FLAGS=(--force)
-          if [ "$BUILD_DEPS" = "true" ]; then
-            BUILD_FLAGS+=(--deps)
+            BUILD_FLAGS=(--force)
+            [ "$BUILD_DEPS" = "true" ] && BUILD_FLAGS+=(--deps)
+            [ "$SOURCE_DEPS" = "true" ] && BUILD_FLAGS+=(--source-deps)
+            [ "$IGNORE_FOOTPRINT" = "true" ] && BUILD_FLAGS+=(--ignore-footprint)
+            [ "$IGNORE_MD5SUM" = "true" ] && BUILD_FLAGS+=(--ignore-md5sum)
+            /usr/bin/pe --config "$PE_CONF" build "${BUILD_FLAGS[@]}" "${TARGET_PORTS[@]}"
           fi
-          if [ "$IGNORE_FOOTPRINT" = "true" ]; then
-            BUILD_FLAGS+=(--ignore-footprint)
-          fi
-          if [ "$IGNORE_MD5SUM" = "true" ]; then
-            BUILD_FLAGS+=(--ignore-md5sum)
-          fi
-
-          if [ -n "$ROOT_PORT_NAME" ]; then
-            REPO_BASENAME="${PORT_REPO##*/}"
-            NORM_PATH="${PORT_PATH#./}"
-            NORM_PATH="${NORM_PATH%/}"
-            if [ -z "$NORM_PATH" ] || [ "$NORM_PATH" = "." ] || [ "$NORM_PATH" = "all" ] || [ "$NORM_PATH" = "$ROOT_PORT_NAME" ] || [ "$NORM_PATH" = "$REPO_BASENAME" ]; then
-              TARGET_PORTS=("$ROOT_PORT_NAME")
-            else
-              echo "error: single-port repo $PORT_REPO defines '$ROOT_PORT_NAME' at repo root, not '$PORT_PATH'" >&2
-              exit 1
-            fi
-          elif [ "$PORT_PATH" = "all" ]; then
-            mapfile -t TARGET_PORTS < <(/usr/bin/pe --config "$PE_CONF" list --ports)
-          else
-            read -r -a RAW_PORTS <<< "$PORT_PATH"
-            TARGET_PORTS=()
-            for p in "${RAW_PORTS[@]}"; do
-              p="${p#./}"
-              p="${p%/}"
-              if [ -n "$p" ]; then
-                TARGET_PORTS+=("$p")
-              fi
-            done
-          fi
-
-          if [ "${#TARGET_PORTS[@]}" -eq 0 ]; then
-            echo "error: no ports selected to build" >&2
-            exit 1
-          fi
-
-          mapfile -t DISCOVERED_PORTS < <(/usr/bin/pe --config "$PE_CONF" list --ports)
-          echo "Discovered ${#DISCOVERED_PORTS[@]} port(s) in $PORTS_DIR"
-          if [ "${#DISCOVERED_PORTS[@]}" -eq 0 ]; then
-            echo "error: no Pkgfile ports found in $PORTS_DIR (checked out $PORT_REPO)" >&2
-            ls -la "$PORTS_DIR" >&2 || true
-            exit 1
-          elif [ "${#DISCOVERED_PORTS[@]}" -le 50 ]; then
-            printf '  %s\n' "${DISCOVERED_PORTS[@]}"
-          fi
-          echo "Building ports: ${TARGET_PORTS[*]}"
-          /usr/bin/pe --config "$PE_CONF" build "${BUILD_FLAGS[@]}" "${TARGET_PORTS[@]}"
 
           shopt -s nullglob
           BUILT=("$PKG_DIR"/*.pkg.tar.*)
           if [ "${#BUILT[@]}" -eq 0 ]; then
-            echo "error: /usr/bin/pe build produced no .pkg.tar.* archives" >&2
+            echo "error: build produced no .pkg.tar.* archives" >&2
             exit 1
           fi
           ls -lh "${BUILT[@]}"
@@ -252,7 +250,7 @@ jobs:
           tar -cf "$OUT_DIR/bundle.tar" -C "$OUT_DIR" packages bin
           ls -lh "$OUT_DIR/bundle.tar"
 
-      - name: Upload built packages and static pe-index artifact
+      - name: Upload built packages and static release tools
         uses: actions/upload-artifact@v4
         with:
           name: pe-built-bundle
@@ -263,22 +261,21 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     steps:
-      - name: Download port tree artifact (for pe-index metadata)
+      - name: Download port tree artifact (for metadata enrichment)
         uses: actions/download-artifact@v4
         with:
           name: port-src-bundle
           path: port_bundle
 
-      - name: Download built packages and static pe-index artifact
+      - name: Download built packages and static release tools
         uses: actions/download-artifact@v4
         with:
           name: pe-built-bundle
           path: bundle
 
-      - name: Update index.json and publish GitHub Release
+      - name: Stage index.json and publish GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
-          PORT_REPO: ${{ inputs.port_repo || 'kryx-linux/ports' }}
           RELEASE_TAG: ${{ inputs.release_tag || 'rolling-x86_64' }}
           TARGET_ARCH: x86_64
         run: |
@@ -290,19 +287,7 @@ jobs:
           mkdir -p "$STAGE_DIR" "$UPLOAD_DIR" "$RAW_PORT_SRC"
 
           tar -xf bundle/bundle.tar -C "$STAGE_DIR"
-          chmod 0755 "$STAGE_DIR/bin/pe-index"
           tar -xf port_bundle/port-src.tar -C "$RAW_PORT_SRC"
-
-          PORTS_DIR="$RAW_PORT_SRC"
-          if [ -f "$RAW_PORT_SRC/Pkgfile" ]; then
-            ROOT_PORT_NAME="$(cd "$RAW_PORT_SRC" && bash -c 'set -e; source ./Pkgfile >/dev/null; printf "%s" "${name:-}"')"
-            if [ -z "$ROOT_PORT_NAME" ]; then
-              ROOT_PORT_NAME="${PORT_REPO##*/}"
-            fi
-            PORTS_DIR="$STAGE_DIR/ports"
-            mkdir -p "$PORTS_DIR/$ROOT_PORT_NAME"
-            cp -a "$RAW_PORT_SRC/." "$PORTS_DIR/$ROOT_PORT_NAME/"
-          fi
 
           if ! gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             gh release create "$RELEASE_TAG" \
@@ -317,68 +302,61 @@ jobs:
             --pattern "index.json" \
             --clobber || true
 
-          "$STAGE_DIR/bin/pe-index" \
-            --packages "$STAGE_DIR/packages" \
-            --index "$STAGE_DIR/index.json" \
-            --ports "$PORTS_DIR" \
-            --arch "$TARGET_ARCH" \
-            --base-url "https://github.com/${GITHUB_REPOSITORY}/releases/download/${RELEASE_TAG}"
+          if [ -x "$STAGE_DIR/bin/kryx-src" ]; then
+            "$STAGE_DIR/bin/kryx-src" stage \
+              --packages "$STAGE_DIR/packages" \
+              --ports "$RAW_PORT_SRC" \
+              --index "$STAGE_DIR/index.json" \
+              --upload-dir "$UPLOAD_DIR" \
+              --arch "$TARGET_ARCH" \
+              --base-url "https://github.com/${GITHUB_REPOSITORY}/releases/download/${RELEASE_TAG}"
 
-          shopt -s nullglob
-          ARCHIVES=("$STAGE_DIR/packages"/*.pkg.tar.*)
-          if [ "${#ARCHIVES[@]}" -eq 0 ]; then
-            echo "error: no package archives to upload" >&2
-            exit 1
-          fi
+            shopt -s nullglob
+            UPLOAD_FILES=("$UPLOAD_DIR"/*)
+            gh release upload "$RELEASE_TAG" \
+              --repo "$GITHUB_REPOSITORY" \
+              "${UPLOAD_FILES[@]}" \
+              --clobber
 
-          # GitHub Releases replaces '#' with '.' in asset names and `gh release upload`
-          # interprets '#' as file#label, so upload with GitHub-safe filenames while
-          # preserving the CRUX '#' filename field in index.json for `pe install`.
-          UPLOAD_FILES=()
-          for f in "${ARCHIVES[@]}"; do
-            orig="$(basename "$f")"
-            safe="${orig//#/.}"
-            cp -f "$f" "$UPLOAD_DIR/$safe"
-            UPLOAD_FILES+=("$UPLOAD_DIR/$safe")
-          done
+            gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json assets > "$STAGE_DIR/assets.json"
 
-          gh release upload "$RELEASE_TAG" \
-            --repo "$GITHUB_REPOSITORY" \
-            "${UPLOAD_FILES[@]}" \
-            --clobber
+            "$STAGE_DIR/bin/kryx-src" rewrite-urls \
+              --index "$STAGE_DIR/index.json" \
+              --assets-json "$STAGE_DIR/assets.json" \
+              --packages "$STAGE_DIR/packages"
+          else
+            chmod 0755 "$STAGE_DIR/bin/pe-index"
+            "$STAGE_DIR/bin/pe-index" \
+              --packages "$STAGE_DIR/packages" \
+              --index "$STAGE_DIR/index.json" \
+              --ports "$RAW_PORT_SRC" \
+              --arch "$TARGET_ARCH" \
+              --base-url "https://github.com/${GITHUB_REPOSITORY}/releases/download/${RELEASE_TAG}"
 
-          # Rewrite index.json download URLs to the exact browser_download_url values
-          # reported by GitHub Releases for the uploaded assets.
-          ASSETS_JSON="$(gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json assets)"
-          jq --argjson assets "$ASSETS_JSON" '
-            ($assets.assets | map({(.name): .url}) | add // {}) as $urlmap |
-            .packages |= with_entries(
-              .value.versions |= map(
-                (.filename | gsub("#"; ".")) as $safe |
-                if $urlmap[.filename] then
-                  .url = $urlmap[.filename]
-                elif $urlmap[$safe] then
-                  .url = $urlmap[$safe]
-                else
-                  .
-                end
+            shopt -s nullglob
+            ARCHIVES=("$STAGE_DIR/packages"/*.pkg.tar.*)
+            UPLOAD_FILES=()
+            for f in "${ARCHIVES[@]}"; do
+              orig="$(basename "$f")"
+              safe="${orig//#/.}"
+              cp -f "$f" "$UPLOAD_DIR/$safe"
+              UPLOAD_FILES+=("$UPLOAD_DIR/$safe")
+            done
+            gh release upload "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" "${UPLOAD_FILES[@]}" --clobber
+            ASSETS_JSON="$(gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json assets)"
+            jq --argjson assets "$ASSETS_JSON" '
+              ($assets.assets | map({(.name): .url}) | add // {}) as $urlmap |
+              .packages |= with_entries(
+                .value.versions |= map(
+                  (.filename | gsub("#"; ".")) as $safe |
+                  if $urlmap[.filename] then .url = $urlmap[.filename]
+                  elif $urlmap[$safe] then .url = $urlmap[$safe]
+                  else . end
+                )
               )
-            )
-          ' "$STAGE_DIR/index.json" > "$STAGE_DIR/index.json.tmp"
-          mv "$STAGE_DIR/index.json.tmp" "$STAGE_DIR/index.json"
-
-          # Verify every newly built package has a matching uploaded release asset URL.
-          for f in "${ARCHIVES[@]}"; do
-            orig="$(basename "$f")"
-            safe="${orig//#/.}"
-            resolved_url="$(jq -r --arg fn "$orig" '
-              .packages[]?.versions[]? | select(.filename == $fn) | .url
-            ' "$STAGE_DIR/index.json" | head -n 1)"
-            if [ -z "$resolved_url" ] || ! grep -Fq "/${safe}" <<< "$resolved_url"; then
-              echo "error: index.json URL for $orig ($resolved_url) does not match uploaded asset $safe" >&2
-              exit 1
-            fi
-          done
+            ' "$STAGE_DIR/index.json" > "$STAGE_DIR/index.json.tmp"
+            mv "$STAGE_DIR/index.json.tmp" "$STAGE_DIR/index.json"
+          fi
 
           test -s "$STAGE_DIR/index.json"
           cat "$STAGE_DIR/index.json"
