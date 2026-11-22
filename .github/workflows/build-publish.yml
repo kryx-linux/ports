@@ -24,7 +24,7 @@ on:
         required: true
         default: ghcr.io/kryx-linux/image:latest
       release_tag:
-        description: Target GitHub Release tag in kryx-linux/packages
+        description: Target GitHub Release tag in kryx-linux/ports
         type: string
         required: true
         default: rolling-x86_64
