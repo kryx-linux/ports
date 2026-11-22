@@ -1,0 +1,16 @@
+# Description: General-purpose programming language and toolchain
+# URL: https://ziglang.org/
+# Maintainer: Safwan Ehfaz Saad
+
+name=zig
+version=0.17.1
+release=1
+source=(https://ziglang.org/download/${version}/zig-x86_64-linux-${version}.tar.xz)
+
+build() {
+    cd "$SRC/zig-x86_64-linux-${version}"
+
+    install -d "$PKG/usr/lib/zig" "$PKG/usr/bin"
+    cp -a lib/. "$PKG/usr/lib/zig/"
+    install -Dm755 zig "$PKG/usr/bin/zig"
+}
