@@ -1,0 +1,23 @@
+# Description: Binary-first package manager and repository indexer for CRUX Linux
+# URL:         https://github.com/crux-rolling/pe
+# Maintainer:  crux-rolling and contributors
+# Depends on:  go
+# Optional:    libarchive zstd xz bzip2 gzip curl
+
+name=pe
+version=0.1.0
+release=1
+source=(https://github.com/crux-rolling/$name/archive/v$version/$name-$version.tar.gz)
+
+build() {
+	cd "$name-$version"
+
+	export CGO_ENABLED=0
+	export GOOS=linux
+	export GOARCH=amd64
+	export GOPROXY=off
+	export GOCACHE="${PKGMK_WORK_DIR:-$SRC}/gocache"
+	export GOMODCACHE="${PKGMK_WORK_DIR:-$SRC}/gomodcache"
+
+	make VERSION="$version" DESTDIR="$PKG" install
+}
