@@ -1,11 +1,11 @@
 # Description: Binary-first package manager and repository indexer for CRUX Linux
 # URL:         https://github.com/crux-rolling/pe
-# Maintainer:  crux-rolling and contributors
+# Maintainer:  kryx-linux and contributors
 # Depends on:  go
 # Optional:    libarchive zstd xz bzip2 gzip curl
 
 name=pe
-version=0.2.1
+version=0.3.0
 release=1
 source=(https://github.com/crux-rolling/$name/archive/v$version/$name-$version.tar.gz)
 
