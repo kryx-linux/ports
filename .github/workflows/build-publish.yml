@@ -92,9 +92,7 @@ jobs:
           submodules: false
           path: target_repo_tmp
 
-      - name: Initialize non-base submodules and merge into port_src
-        env:
-          PORT_REPO: ${{ inputs.port_repo || 'kryx-linux/ports' }}
+      - name: Initialize non-base submodules and merge directly into port_src root
         run: |
           set -euo pipefail
           cd target_repo_tmp
@@ -108,7 +106,7 @@ jobs:
                 *)
                   echo "Initializing submodule $sub_path..."
                   git submodule update --init --depth 1 "$sub_path" || {
-                    echo "Warning: shallow submodule fetch failed for $sub_path, trying full fetch..."
+                    echo "Warning: shallow fetch failed for $sub_path, trying full fetch..."
                     git submodule update --init "$sub_path"
                   }
                   ;;
@@ -116,17 +114,15 @@ jobs:
             done
           fi
 
-          cd ..
-          TARGET_NAME="${PORT_REPO##*/}"
-          rm -rf "port_src/${TARGET_NAME}"
-          mv target_repo_tmp "port_src/${TARGET_NAME}"
-
-          # যদি target_repo_tmp-এর ভেতরে খালি core/opt/contrib/xorg সাবমডিউল ডিরেক্টরি থাকে, সেগুলো পরিষ্কার করা
           for repo in core opt contrib xorg; do
-            if [ -d "port_src/${TARGET_NAME}/${repo}" ] && [ -z "$(ls -A "port_src/${TARGET_NAME}/${repo}")" ]; then
-              rmdir "port_src/${TARGET_NAME}/${repo}"
+            if [ -d "$repo" ] && [ -z "$(ls -A "$repo")" ]; then
+              rmdir "$repo"
             fi
           done
+
+          cp -a . ../port_src/
+          cd ..
+          rm -rf target_repo_tmp
 
       - name: Package port tree for container build
         env:
@@ -135,9 +131,9 @@ jobs:
           set -euo pipefail
           PKGFILE_COUNT="$(find port_src -name Pkgfile -type f | wc -l)"
           echo "Found $PKGFILE_COUNT total Pkgfile(s) across base collections and $PORT_REPO"
+          ls -la port_src
           if [ "$PKGFILE_COUNT" -eq 0 ]; then
             echo "error: no Pkgfile found in port_src" >&2
-            ls -la port_src >&2 || true
             exit 1
           fi
           tar --exclude='.git' -cf port-src.tar -C port_src .
@@ -149,6 +145,7 @@ jobs:
           name: port-src-bundle
           path: port-src.tar
           retention-days: 1
+
   plan:
     needs: prepare
     runs-on: ubuntu-latest
