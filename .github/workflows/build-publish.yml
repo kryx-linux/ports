@@ -145,13 +145,26 @@ jobs:
               --compact \
               "${TARGET_PORTS[@]}")"
             echo "Plan JSON: $PLAN_JSON"
-            echo "matrix=$PLAN_JSON" >> "$GITHUB_OUTPUT"
-            echo "total_ports=$(printf '%s' "$PLAN_JSON" | sed -n 's/.*"total_ports":\([0-9]*\).*/\1/p')" >> "$GITHUB_OUTPUT"
-            echo "truncated=$(printf '%s' "$PLAN_JSON" | grep -q '"truncated":true' && echo true || echo false)" >> "$GITHUB_OUTPUT"
+            # Multiline-safe output (delimiter form) in case the JSON contains newlines.
+            {
+              echo "matrix<<__KRYX_MATRIX_EOF__"
+              printf '%s\n' "$PLAN_JSON"
+              echo "__KRYX_MATRIX_EOF__"
+            } >> "$GITHUB_OUTPUT"
+            TOTAL_PORTS="$(printf '%s' "$PLAN_JSON" | tr -d '\n' | sed -n 's/.*"total_ports":[[:space:]]*\([0-9]*\).*/\1/p')"
+            echo "total_ports=${TOTAL_PORTS:-0}" >> "$GITHUB_OUTPUT"
+            if printf '%s' "$PLAN_JSON" | tr -d '\n' | grep -Eq '"truncated":[[:space:]]*true'; then
+              echo "truncated=true" >> "$GITHUB_OUTPUT"
+            else
+              echo "truncated=false" >> "$GITHUB_OUTPUT"
+            fi
           else
             # Fallback for older container images before kryx-src plan is baked in.
             echo "warning: /usr/bin/kryx-src absent; running single-job matrix fallback" >&2
-            FALLBACK="{\"total_ports\":1,\"truncated\":false,\"include\":[{\"id\":\"batch\",\"wave\":0,\"ports\":[\"$PORT_PATH\"],\"port_arg\":\"$PORT_PATH\",\"pkg_names\":[]}]}"
+            # JSON-escape backslashes and double quotes in the user-supplied port path.
+            ESC_PATH="${PORT_PATH//\\/\\\\}"
+            ESC_PATH="${ESC_PATH//\"/\\\"}"
+            FALLBACK="{\"total_ports\":1,\"truncated\":false,\"include\":[{\"id\":\"batch\",\"wave\":0,\"ports\":[\"$ESC_PATH\"],\"port_arg\":\"$ESC_PATH\",\"pkg_names\":[]}]}"
             echo "matrix=$FALLBACK" >> "$GITHUB_OUTPUT"
             echo "total_ports=1" >> "$GITHUB_OUTPUT"
             echo "truncated=false" >> "$GITHUB_OUTPUT"
@@ -159,12 +172,16 @@ jobs:
 
   build:
     needs: [prepare, plan]
+    # Skip (instead of failing strategy evaluation) when the plan resolved zero jobs.
+    if: ${{ needs.plan.outputs.matrix != '' && fromJson(needs.plan.outputs.matrix).include[0] != null }}
     runs-on: ubuntu-latest
     timeout-minutes: 350
     strategy:
       fail-fast: false
       max-parallel: 6
-      matrix: ${{ fromJson(needs.plan.outputs.matrix) }}
+      # Only pass the job list; top-level scalars (total_ports, truncated) are not valid matrix vectors.
+      matrix:
+        include: ${{ fromJson(needs.plan.outputs.matrix).include }}
     container:
       image: ${{ inputs.image_ref || 'ghcr.io/kryx-linux/image:latest' }}
     steps:
