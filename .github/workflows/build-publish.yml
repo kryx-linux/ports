@@ -175,7 +175,24 @@ jobs:
           rm -rf "$SRC_DIR"
           mkdir -p "$SRC_DIR"
           tar -xf "$GITHUB_WORKSPACE/port_bundle/port-src.tar" -C "$SRC_DIR"
-          read -r -a TARGET_PORTS <<< "$PORT_PATH"
+          read -r -a RAW_PORTS <<< "$PORT_PATH"
+
+          TARGET_PORTS=()
+          for item in "${RAW_PORTS[@]}"; do
+            if [ "$item" = "all" ] || [ -d "$SRC_DIR/$item" ]; then
+              TARGET_PORTS+=("$item")
+            else
+              MATCH="$(find "$SRC_DIR" -maxdepth 4 -type f -path "*/${item}/Pkgfile" | head -n 1 || true)"
+              if [ -n "$MATCH" ]; then
+                REL_PATH="${MATCH#"$SRC_DIR"/}"
+                REL_PATH="${REL_PATH%/Pkgfile}"
+                echo "Resolved port '$item' -> '$REL_PATH'"
+                TARGET_PORTS+=("$REL_PATH")
+              else
+                TARGET_PORTS+=("$item")
+              fi
+            fi
+          done
 
           if [ -x /usr/bin/kryx-src ]; then
             PLAN_JSON="$(/usr/bin/kryx-src plan \
@@ -186,7 +203,6 @@ jobs:
               --compact \
               "${TARGET_PORTS[@]}")"
             echo "Plan JSON: $PLAN_JSON"
-            # Multiline-safe output (delimiter form) in case the JSON contains newlines.
             {
               echo "matrix<<__KRYX_MATRIX_EOF__"
               printf '%s\n' "$PLAN_JSON"
@@ -200,9 +216,7 @@ jobs:
               echo "truncated=false" >> "$GITHUB_OUTPUT"
             fi
           else
-            # Fallback for older container images before kryx-src plan is baked in.
             echo "warning: /usr/bin/kryx-src absent; running single-job matrix fallback" >&2
-            # JSON-escape backslashes and double quotes in the user-supplied port path.
             ESC_PATH="${PORT_PATH//\\/\\\\}"
             ESC_PATH="${ESC_PATH//\"/\\\"}"
             FALLBACK="{\"total_ports\":1,\"truncated\":false,\"include\":[{\"id\":\"batch\",\"wave\":0,\"ports\":[\"$ESC_PATH\"],\"port_arg\":\"$ESC_PATH\",\"pkg_names\":[]}]}"
@@ -210,7 +224,6 @@ jobs:
             echo "total_ports=1" >> "$GITHUB_OUTPUT"
             echo "truncated=false" >> "$GITHUB_OUTPUT"
           fi
-
   build:
     needs: [prepare, plan]
     # Skip (instead of failing strategy evaluation) when the plan resolved zero jobs.
