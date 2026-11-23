@@ -75,13 +75,33 @@ jobs:
   prepare:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout source port repository (with submodules)
+      - name: Checkout base collection repositories (core, opt, contrib, xorg)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p port_src
+          for repo in core opt contrib xorg; do
+            echo "Cloning kryx-linux/${repo} into port_src/${repo}..."
+            git clone --depth 1 "https://github.com/kryx-linux/${repo}.git" "port_src/${repo}"
+          done
+
+      - name: Checkout target source port repository
         uses: actions/checkout@v4
         with:
           repository: ${{ inputs.port_repo || 'kryx-linux/ports' }}
           ref: ${{ inputs.port_ref || 'main' }}
           submodules: recursive
-          path: port_src
+          path: target_repo_tmp
+
+      - name: Merge target port repository into port_src
+        env:
+          PORT_REPO: ${{ inputs.port_repo || 'kryx-linux/ports' }}
+        run: |
+          set -euo pipefail
+          TARGET_NAME="${PORT_REPO##*/}"
+          rm -rf "port_src/${TARGET_NAME}"
+          mv target_repo_tmp "port_src/${TARGET_NAME}"
 
       - name: Package port tree for container build
         env:
@@ -89,9 +109,9 @@ jobs:
         run: |
           set -euo pipefail
           PKGFILE_COUNT="$(find port_src -name Pkgfile -type f | wc -l)"
-          echo "Found $PKGFILE_COUNT Pkgfile(s) in $PORT_REPO"
+          echo "Found $PKGFILE_COUNT total Pkgfile(s) across base collections and $PORT_REPO"
           if [ "$PKGFILE_COUNT" -eq 0 ]; then
-            echo "error: no Pkgfile found in $PORT_REPO" >&2
+            echo "error: no Pkgfile found in port_src" >&2
             ls -la port_src >&2 || true
             exit 1
           fi
@@ -104,7 +124,6 @@ jobs:
           name: port-src-bundle
           path: port-src.tar
           retention-days: 1
-
   plan:
     needs: prepare
     runs-on: ubuntu-latest
