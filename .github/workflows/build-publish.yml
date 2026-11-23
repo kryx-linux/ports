@@ -1,4 +1,4 @@
-name: Build Packages with kryx-src and Publish Rolling Repo
+name: Build Packages with kryx-src (Matrix) and Publish Rolling Repo
 
 on:
   workflow_dispatch:
@@ -14,12 +14,12 @@ on:
         required: true
         default: main
       port_path:
-        description: Space-separated port path(s), package name(s), collection(s), or "all" (e.g. "linux-6.18", "kernel", "rolling", or "all")
+        description: Space-separated port path(s), package name(s), collection(s), or "all"
         type: string
         required: true
         default: kernel
       image_ref:
-        description: CRUX rolling container image reference
+        description: CRUX/KryX rolling container image reference
         type: string
         required: true
         default: ghcr.io/kryx-linux/image:latest
@@ -28,8 +28,18 @@ on:
         type: string
         required: true
         default: rolling-x86_64
+      max_ports:
+        description: Max ports per workflow run (protects GitHub free-tier concurrency limits)
+        type: string
+        required: false
+        default: "20"
+      chunk_size:
+        description: Ports per matrix job (1 = 1 job per package with full 6h budget)
+        type: string
+        required: false
+        default: "1"
       build_deps:
-        description: Also resolve and satisfy recursive Pkgfile dependencies (--deps)
+        description: Also resolve and satisfy recursive Pkgfile runtime + make deps (--deps)
         type: boolean
         required: false
         default: false
@@ -95,9 +105,66 @@ jobs:
           path: port-src.tar
           retention-days: 1
 
-  build:
+  plan:
     needs: prepare
     runs-on: ubuntu-latest
+    container:
+      image: ${{ inputs.image_ref || 'ghcr.io/kryx-linux/image:latest' }}
+    outputs:
+      matrix: ${{ steps.plan.outputs.matrix }}
+      total_ports: ${{ steps.plan.outputs.total_ports }}
+      truncated: ${{ steps.plan.outputs.truncated }}
+    steps:
+      - name: Download port tree artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: port-src-bundle
+          path: port_bundle
+
+      - name: Generate bounded topological build matrix
+        id: plan
+        env:
+          PORT_REPO: ${{ inputs.port_repo || 'kryx-linux/ports' }}
+          PORT_PATH: ${{ inputs.port_path || 'kernel' }}
+          MAX_PORTS: ${{ inputs.max_ports || '20' }}
+          CHUNK_SIZE: ${{ inputs.chunk_size || '1' }}
+        run: |
+          set -euo pipefail
+          SRC_DIR="$RUNNER_TEMP/plan-src"
+          rm -rf "$SRC_DIR"
+          mkdir -p "$SRC_DIR"
+          tar -xf "$GITHUB_WORKSPACE/port_bundle/port-src.tar" -C "$SRC_DIR"
+          read -r -a TARGET_PORTS <<< "$PORT_PATH"
+
+          if [ -x /usr/bin/kryx-src ]; then
+            PLAN_JSON="$(/usr/bin/kryx-src plan \
+              --ports "$SRC_DIR" \
+              --port-repo "$PORT_REPO" \
+              --max-ports "$MAX_PORTS" \
+              --chunk-size "$CHUNK_SIZE" \
+              --compact \
+              "${TARGET_PORTS[@]}")"
+            echo "Plan JSON: $PLAN_JSON"
+            echo "matrix=$PLAN_JSON" >> "$GITHUB_OUTPUT"
+            echo "total_ports=$(printf '%s' "$PLAN_JSON" | sed -n 's/.*"total_ports":\([0-9]*\).*/\1/p')" >> "$GITHUB_OUTPUT"
+            echo "truncated=$(printf '%s' "$PLAN_JSON" | grep -q '"truncated":true' && echo true || echo false)" >> "$GITHUB_OUTPUT"
+          else
+            # Fallback for older container images before kryx-src plan is baked in.
+            echo "warning: /usr/bin/kryx-src absent; running single-job matrix fallback" >&2
+            FALLBACK="{\"total_ports\":1,\"truncated\":false,\"include\":[{\"id\":\"batch\",\"wave\":0,\"ports\":[\"$PORT_PATH\"],\"port_arg\":\"$PORT_PATH\",\"pkg_names\":[]}]}"
+            echo "matrix=$FALLBACK" >> "$GITHUB_OUTPUT"
+            echo "total_ports=1" >> "$GITHUB_OUTPUT"
+            echo "truncated=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  build:
+    needs: [prepare, plan]
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    strategy:
+      fail-fast: false
+      max-parallel: 6
+      matrix: ${{ fromJson(needs.plan.outputs.matrix) }}
     container:
       image: ${{ inputs.image_ref || 'ghcr.io/kryx-linux/image:latest' }}
     steps:
@@ -107,25 +174,11 @@ jobs:
           name: port-src-bundle
           path: port_bundle
 
-      - name: Verify CRUX container and preinstalled kryx-src / pe tools
-        run: |
-          set -euo pipefail
-          if command -v crux >/dev/null 2>&1; then
-            crux
-          fi
-          test -x /usr/bin/pe
-          test -x /usr/bin/pe-index
-          /usr/bin/pe --version
-          if [ -x /usr/bin/kryx-src ]; then
-            /usr/bin/kryx-src --version
-          else
-            echo "warning: /usr/bin/kryx-src not found in container image; rebuild ghcr.io/kryx-linux/image for unified kryx-src support" >&2
-          fi
-
-      - name: Build target port(s) with kryx-src
+      - name: Build assigned matrix port(s)
         env:
           PORT_REPO: ${{ inputs.port_repo || 'kryx-linux/ports' }}
-          PORT_PATH: ${{ inputs.port_path || 'kernel' }}
+          JOB_PORTS: ${{ matrix.port_arg }}
+          JOB_ID: ${{ matrix.id }}
           RELEASE_TAG: ${{ inputs.release_tag || 'rolling-x86_64' }}
           BUILD_DEPS: ${{ inputs.build_deps }}
           SOURCE_DEPS: ${{ inputs.source_deps }}
@@ -141,17 +194,10 @@ jobs:
           mkdir -p "$RAW_PORT_SRC" "$PKG_DIR" "$OUT_DIR/bin"
 
           tar -xf "$GITHUB_WORKSPACE/port_bundle/port-src.tar" -C "$RAW_PORT_SRC"
-
-          read -r -a TARGET_PORTS <<< "$PORT_PATH"
-          if [ "${#TARGET_PORTS[@]}" -eq 0 ]; then
-            echo "error: no target ports specified in port_path" >&2
-            exit 1
-          fi
+          read -r -a TARGET_PORTS <<< "$JOB_PORTS"
 
           if [ -x /usr/bin/kryx-src ]; then
-            echo "=== Lint target port(s) ==="
             /usr/bin/kryx-src lint --ports "$RAW_PORT_SRC" "${TARGET_PORTS[@]}" || true
-
             SRC_FLAGS=(
               --ports "$RAW_PORT_SRC"
               --port-repo "$PORT_REPO"
@@ -165,40 +211,22 @@ jobs:
               --force
               --color never
             )
-            if [ "$BUILD_DEPS" = "true" ]; then
-              SRC_FLAGS+=(--deps --sync-index)
-            fi
-            if [ "$SOURCE_DEPS" = "true" ]; then
-              SRC_FLAGS+=(--source-deps)
-            fi
-            if [ "$IGNORE_FOOTPRINT" = "true" ]; then
-              SRC_FLAGS+=(--ignore-footprint)
-            fi
-            if [ "$IGNORE_MD5SUM" = "true" ]; then
-              SRC_FLAGS+=(--ignore-md5sum)
-            fi
+            [ "$BUILD_DEPS" = "true" ] && SRC_FLAGS+=(--deps --sync-index)
+            [ "$SOURCE_DEPS" = "true" ] && SRC_FLAGS+=(--source-deps)
+            [ "$IGNORE_FOOTPRINT" = "true" ] && SRC_FLAGS+=(--ignore-footprint)
+            [ "$IGNORE_MD5SUM" = "true" ] && SRC_FLAGS+=(--ignore-md5sum)
 
-            echo "=== Building ports via kryx-src: ${TARGET_PORTS[*]} ==="
+            echo "=== Matrix job [$JOB_ID]: kryx-src pkg ${TARGET_PORTS[*]} ==="
             /usr/bin/kryx-src pkg "${SRC_FLAGS[@]}" "${TARGET_PORTS[@]}"
             cp -f /usr/bin/kryx-src "$OUT_DIR/bin/kryx-src"
             chmod 0755 "$OUT_DIR/bin/kryx-src"
           else
-            # Fallback for older container images prior to kryx-src installation.
             mkdir -p "$WORK_ROOT/cache" "$WORK_ROOT/sources" "$WORK_ROOT/work"
-            PORTS_DIR="$RAW_PORT_SRC"
-            if [ -f "$RAW_PORT_SRC/Pkgfile" ]; then
-              ROOT_PORT_NAME="$(cd "$RAW_PORT_SRC" && bash -c 'set -e; source ./Pkgfile >/dev/null; printf "%s" "${name:-}"')"
-              ROOT_PORT_NAME="${ROOT_PORT_NAME:-${PORT_REPO##*/}}"
-              PORTS_DIR="$WORK_ROOT/ports"
-              mkdir -p "$PORTS_DIR/$ROOT_PORT_NAME"
-              cp -a "$RAW_PORT_SRC/." "$PORTS_DIR/$ROOT_PORT_NAME/"
-              TARGET_PORTS=("$ROOT_PORT_NAME")
-            fi
             PE_CONF="$WORK_ROOT/pe.ci.ini"
             cat > "$PE_CONF" <<EOF
           [paths]
           root = /
-          ports_dir = $PORTS_DIR
+          ports_dir = $RAW_PORT_SRC
           collections =
           cache_dir = $WORK_ROOT/cache
           source_cache = $WORK_ROOT/sources
@@ -247,18 +275,21 @@ jobs:
 
           cp -f /usr/bin/pe-index "$OUT_DIR/bin/pe-index"
           chmod 0755 "$OUT_DIR/bin/pe-index"
-          tar -cf "$OUT_DIR/bundle.tar" -C "$OUT_DIR" packages bin
-          ls -lh "$OUT_DIR/bundle.tar"
 
-      - name: Upload built packages and static release tools
+          SAFE_ID="$(printf '%s' "$JOB_ID" | tr '/: ' '---')"
+          echo "SAFE_ID=$SAFE_ID" >> "$GITHUB_ENV"
+          tar -cf "$OUT_DIR/bundle-${SAFE_ID}.tar" -C "$OUT_DIR" packages bin
+
+      - name: Upload built package bundle
         uses: actions/upload-artifact@v4
         with:
-          name: pe-built-bundle
-          path: dist/bundle.tar
+          name: pe-built-${{ env.SAFE_ID }}
+          path: dist/bundle-*.tar
           retention-days: 1
 
   publish:
-    needs: build
+    needs: [prepare, plan, build]
+    if: always() && needs.prepare.result == 'success' && needs.plan.result == 'success' && (needs.build.result == 'success' || needs.build.result == 'failure')
     runs-on: ubuntu-latest
     steps:
       - name: Download port tree artifact (for metadata enrichment)
@@ -267,15 +298,17 @@ jobs:
           name: port-src-bundle
           path: port_bundle
 
-      - name: Download built packages and static release tools
+      - name: Download all built matrix package bundles
         uses: actions/download-artifact@v4
         with:
-          name: pe-built-bundle
-          path: bundle
+          pattern: pe-built-*
+          path: bundles
+          merge-multiple: true
 
-      - name: Stage index.json and publish GitHub Release
+      - name: Atomically stage, sign, and publish GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
+          KRYX_SIGNING_KEY: ${{ secrets.KRYX_SIGNING_KEY }}
           RELEASE_TAG: ${{ inputs.release_tag || 'rolling-x86_64' }}
           TARGET_ARCH: x86_64
         run: |
@@ -284,16 +317,24 @@ jobs:
           UPLOAD_DIR="$STAGE_DIR/upload"
           RAW_PORT_SRC="$STAGE_DIR/port_src"
           rm -rf "$STAGE_DIR"
-          mkdir -p "$STAGE_DIR" "$UPLOAD_DIR" "$RAW_PORT_SRC"
+          mkdir -p "$STAGE_DIR/packages" "$STAGE_DIR/bin" "$UPLOAD_DIR" "$RAW_PORT_SRC"
 
-          tar -xf bundle/bundle.tar -C "$STAGE_DIR"
+          shopt -s nullglob
+          TAR_LIST=(bundles/bundle-*.tar)
+          if [ "${#TAR_LIST[@]}" -eq 0 ]; then
+            echo "error: no matrix build jobs produced package bundles" >&2
+            exit 1
+          fi
+          for b in "${TAR_LIST[@]}"; do
+            tar -xf "$b" -C "$STAGE_DIR"
+          done
           tar -xf port_bundle/port-src.tar -C "$RAW_PORT_SRC"
 
           if ! gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             gh release create "$RELEASE_TAG" \
               --repo "$GITHUB_REPOSITORY" \
               --title "Rolling x86_64 Packages" \
-              --notes "Automated rolling x86_64 CRUX binary packages and pe-index metadata."
+              --notes "Automated rolling x86_64 CRUX/KryX binary packages and pe-index metadata."
           fi
 
           gh release download "$RELEASE_TAG" \
@@ -311,7 +352,6 @@ jobs:
               --arch "$TARGET_ARCH" \
               --base-url "https://github.com/${GITHUB_REPOSITORY}/releases/download/${RELEASE_TAG}"
 
-            shopt -s nullglob
             UPLOAD_FILES=("$UPLOAD_DIR"/*)
             gh release upload "$RELEASE_TAG" \
               --repo "$GITHUB_REPOSITORY" \
@@ -324,6 +364,22 @@ jobs:
               --index "$STAGE_DIR/index.json" \
               --assets-json "$STAGE_DIR/assets.json" \
               --packages "$STAGE_DIR/packages"
+
+            # Optional Ed25519 signing when KRYX_SIGNING_KEY secret is configured.
+            META_FILES=("$STAGE_DIR/index.json")
+            if [ -n "${KRYX_SIGNING_KEY:-}" ]; then
+              KEY_FILE="$STAGE_DIR/signing.key"
+              printf '%s\n' "$KRYX_SIGNING_KEY" > "$KEY_FILE"
+              chmod 0600 "$KEY_FILE"
+              "$STAGE_DIR/bin/kryx-src" sign --key "$KEY_FILE" --file "$STAGE_DIR/index.json"
+              rm -f "$KEY_FILE"
+              META_FILES+=("$STAGE_DIR/index.json.sig")
+            fi
+
+            gh release upload "$RELEASE_TAG" \
+              --repo "$GITHUB_REPOSITORY" \
+              "${META_FILES[@]}" \
+              --clobber
           else
             chmod 0755 "$STAGE_DIR/bin/pe-index"
             "$STAGE_DIR/bin/pe-index" \
@@ -333,7 +389,6 @@ jobs:
               --arch "$TARGET_ARCH" \
               --base-url "https://github.com/${GITHUB_REPOSITORY}/releases/download/${RELEASE_TAG}"
 
-            shopt -s nullglob
             ARCHIVES=("$STAGE_DIR/packages"/*.pkg.tar.*)
             UPLOAD_FILES=()
             for f in "${ARCHIVES[@]}"; do
@@ -356,12 +411,9 @@ jobs:
               )
             ' "$STAGE_DIR/index.json" > "$STAGE_DIR/index.json.tmp"
             mv "$STAGE_DIR/index.json.tmp" "$STAGE_DIR/index.json"
+            gh release upload "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" "$STAGE_DIR/index.json" --clobber
           fi
 
-          test -s "$STAGE_DIR/index.json"
-          cat "$STAGE_DIR/index.json"
-
-          gh release upload "$RELEASE_TAG" \
-            --repo "$GITHUB_REPOSITORY" \
-            "$STAGE_DIR/index.json" \
-            --clobber
+          if [ "${{ needs.plan.outputs.truncated }}" = "true" ]; then
+            echo "::warning::Build plan was capped at max_ports=${{ inputs.max_ports || '20' }} out of ${{ needs.plan.outputs.total_ports }} total ports. Trigger another run for remaining ports."
+          fi
