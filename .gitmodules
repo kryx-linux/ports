@@ -1,12 +1,15 @@
 [submodule "core"]
 	path = core
-	url = https://git.crux.nu/ports/core.git
+	url = https://github.com/kryx-linux/core.git
 [submodule "opt"]
 	path = opt
-	url = https://git.crux.nu/ports/opt.git
+	url = https://github.com/kryx-linux/opt.git
 [submodule "contrib"]
 	path = contrib
-	url = https://git.crux.nu/ports/contrib.git
+	url = https://github.com/kryx-linux/contrib.git
+[submodule "xorg"]
+	path = xorg
+	url = https://github.com/kryx-linux/xorg.git
 [submodule "rolling/gports"]
 	path = rolling/gports
 	url = https://github.com/kryx-linux/gports.git
