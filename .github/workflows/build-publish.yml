@@ -186,10 +186,12 @@ jobs:
               if [ -n "$MATCH" ]; then
                 REL_PATH="${MATCH#"$SRC_DIR"/}"
                 REL_PATH="${REL_PATH%/Pkgfile}"
-                echo "Resolved port '$item' -> '$REL_PATH'"
+                echo "Resolved '$item' -> '$REL_PATH'"
                 TARGET_PORTS+=("$REL_PATH")
               else
-                TARGET_PORTS+=("$item")
+                echo "error: could not find '$item' anywhere in $SRC_DIR" >&2
+                find "$SRC_DIR" -maxdepth 2 -mindepth 1 -type d | sort >&2
+                exit 1
               fi
             fi
           done
@@ -217,7 +219,7 @@ jobs:
             fi
           else
             echo "warning: /usr/bin/kryx-src absent; running single-job matrix fallback" >&2
-            ESC_PATH="${PORT_PATH//\\/\\\\}"
+            ESC_PATH="${TARGET_PORTS[*]//\\/\\\\}"
             ESC_PATH="${ESC_PATH//\"/\\\"}"
             FALLBACK="{\"total_ports\":1,\"truncated\":false,\"include\":[{\"id\":\"batch\",\"wave\":0,\"ports\":[\"$ESC_PATH\"],\"port_arg\":\"$ESC_PATH\",\"pkg_names\":[]}]}"
             echo "matrix=$FALLBACK" >> "$GITHUB_OUTPUT"
