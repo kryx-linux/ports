@@ -5,7 +5,7 @@
 # Optional:    libarchive zstd xz bzip2 gzip curl
 
 name=pe
-version=0.4.0
+version=0.5.1
 release=1
 source=(https://github.com/crux-rolling/$name/archive/v$version/$name-$version.tar.gz)
 
