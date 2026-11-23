@@ -76,8 +76,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout base collection repositories (core, opt, contrib, xorg)
-        env:
-          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           mkdir -p port_src
@@ -91,17 +89,44 @@ jobs:
         with:
           repository: ${{ inputs.port_repo || 'kryx-linux/ports' }}
           ref: ${{ inputs.port_ref || 'main' }}
-          submodules: recursive
+          submodules: false
           path: target_repo_tmp
 
-      - name: Merge target port repository into port_src
+      - name: Initialize non-base submodules and merge into port_src
         env:
           PORT_REPO: ${{ inputs.port_repo || 'kryx-linux/ports' }}
         run: |
           set -euo pipefail
+          cd target_repo_tmp
+
+          if [ -f .gitmodules ]; then
+            git config --file .gitmodules --get-regexp path | awk '{ print $2 }' | while read -r sub_path; do
+              case "$sub_path" in
+                core|opt|contrib|xorg)
+                  echo "Skipping base submodule $sub_path (already cloned)"
+                  ;;
+                *)
+                  echo "Initializing submodule $sub_path..."
+                  git submodule update --init --depth 1 "$sub_path" || {
+                    echo "Warning: shallow submodule fetch failed for $sub_path, trying full fetch..."
+                    git submodule update --init "$sub_path"
+                  }
+                  ;;
+              esac
+            done
+          fi
+
+          cd ..
           TARGET_NAME="${PORT_REPO##*/}"
           rm -rf "port_src/${TARGET_NAME}"
           mv target_repo_tmp "port_src/${TARGET_NAME}"
+
+          # যদি target_repo_tmp-এর ভেতরে খালি core/opt/contrib/xorg সাবমডিউল ডিরেক্টরি থাকে, সেগুলো পরিষ্কার করা
+          for repo in core opt contrib xorg; do
+            if [ -d "port_src/${TARGET_NAME}/${repo}" ] && [ -z "$(ls -A "port_src/${TARGET_NAME}/${repo}")" ]; then
+              rmdir "port_src/${TARGET_NAME}/${repo}"
+            fi
+          done
 
       - name: Package port tree for container build
         env:
