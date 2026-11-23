@@ -80,8 +80,22 @@ jobs:
           set -euo pipefail
           mkdir -p port_src
           for repo in core opt contrib xorg; do
-            echo "Cloning kryx-linux/${repo} into port_src/${repo}..."
-            git clone --depth 1 "https://github.com/kryx-linux/${repo}.git" "port_src/${repo}"
+            REPO_URL="https://github.com/kryx-linux/${repo}.git"
+            TARGET_BRANCH=""
+            for candidate in 3.8 main 3.7; do
+              if git ls-remote --exit-code --heads "$REPO_URL" "$candidate" >/dev/null 2>&1; then
+                TARGET_BRANCH="$candidate"
+                break
+              fi
+            done
+
+            if [ -n "$TARGET_BRANCH" ]; then
+              echo "Cloning kryx-linux/${repo} (branch: ${TARGET_BRANCH}) into port_src/${repo}..."
+              git clone --depth 1 --branch "$TARGET_BRANCH" "$REPO_URL" "port_src/${repo}"
+            else
+              echo "Cloning kryx-linux/${repo} (default branch) into port_src/${repo}..."
+              git clone --depth 1 "$REPO_URL" "port_src/${repo}"
+            fi
           done
 
       - name: Checkout target source port repository
@@ -105,10 +119,12 @@ jobs:
                   ;;
                 *)
                   echo "Initializing submodule $sub_path..."
-                  git submodule update --init --depth 1 "$sub_path" || {
-                    echo "Warning: shallow fetch failed for $sub_path, trying full fetch..."
-                    git submodule update --init "$sub_path"
-                  }
+                  if ! git submodule update --init --depth 1 "$sub_path"; then
+                    SUB_URL="$(git config --file .gitmodules --get "submodule.${sub_path}.url")"
+                    echo "Fallback: cloning $SUB_URL directly into $sub_path..."
+                    rm -rf "$sub_path"
+                    git clone --depth 1 "$SUB_URL" "$sub_path"
+                  fi
                   ;;
               esac
             done
@@ -129,9 +145,10 @@ jobs:
           PORT_REPO: ${{ inputs.port_repo || 'kryx-linux/ports' }}
         run: |
           set -euo pipefail
+          echo "=== Checking wlroots location ==="
+          find port_src -maxdepth 3 -name "wlroots" -type d || true
           PKGFILE_COUNT="$(find port_src -name Pkgfile -type f | wc -l)"
           echo "Found $PKGFILE_COUNT total Pkgfile(s) across base collections and $PORT_REPO"
-          ls -la port_src
           if [ "$PKGFILE_COUNT" -eq 0 ]; then
             echo "error: no Pkgfile found in port_src" >&2
             exit 1
