@@ -196,21 +196,41 @@ jobs:
 
           read -r -a RAW_PORTS <<< "$PORT_PATH"
 
-          # Resolve bare port names (e.g. "wlroots" or "libinput") against the merged tree.
+          # Resolve targets cleanly for:
+          #   - "all"
+          #   - <collection> or <subdir>/<collection> (directory containing nested Pkgfiles)
+          #   - <collection>/<port>[/Pkgfile]
+          #   - <subdir>/<collection>/<port>[/Pkgfile] (arbitrary depth)
+          #   - bare <port> name (by directory basename or Pkgfile `name=` declaration)
           TARGET_PORTS=()
-          for item in "${RAW_PORTS[@]}"; do
-            if [ "$item" = "all" ] || [ -d "$SRC_DIR/$item" ]; then
+          for raw_item in "${RAW_PORTS[@]}"; do
+            item="${raw_item%/}"
+            item="${item%/Pkgfile}"
+            item="${item#./}"
+
+            if [ "$item" = "all" ]; then
+              TARGET_PORTS+=("all")
+            elif [ -f "$SRC_DIR/$item/Pkgfile" ]; then
+              echo "Matched exact port path '$raw_item' -> '$item'"
+              TARGET_PORTS+=("$item")
+            elif [ -d "$SRC_DIR/$item" ] && find "$SRC_DIR/$item" -type f -name Pkgfile -print -quit | grep -q .; then
+              echo "Matched collection/subdir '$raw_item' -> '$item'"
               TARGET_PORTS+=("$item")
             else
-              MATCH="$(find "$SRC_DIR" -maxdepth 4 -type f -path "*/${item}/Pkgfile" | head -n 1 || true)"
+              # Match <subdir>/<collection>/<port>/Pkgfile, <collection>/<port>/Pkgfile, or */<port>/Pkgfile at any depth.
+              MATCH="$(find "$SRC_DIR" -type f -path "*/${item}/Pkgfile" | LC_ALL=C sort | head -n 1 || true)"
+              if [ -z "$MATCH" ] && [[ "$item" != */* ]]; then
+                # Fallback: match by declared Pkgfile `name=<item>` (e.g. `kernel` -> `kernel/linux6.18`).
+                MATCH="$(grep -rlE "^name=['\"]?${item}['\"]?([[:space:]]|$)" "$SRC_DIR" --include=Pkgfile 2>/dev/null | LC_ALL=C sort | head -n 1 || true)"
+              fi
               if [ -n "$MATCH" ]; then
                 REL_PATH="${MATCH#"$SRC_DIR"/}"
                 REL_PATH="${REL_PATH%/Pkgfile}"
-                echo "Resolved '$item' -> '$REL_PATH'"
+                echo "Resolved '$raw_item' -> '$REL_PATH'"
                 TARGET_PORTS+=("$REL_PATH")
               else
-                echo "error: could not find '$item' anywhere in $SRC_DIR" >&2
-                find "$SRC_DIR" -maxdepth 2 -mindepth 1 -type d | sort >&2
+                echo "error: could not find '$raw_item' anywhere in $SRC_DIR" >&2
+                find "$SRC_DIR" -maxdepth 3 -type f -name Pkgfile | sed "s|^$SRC_DIR/||" | sort | head -n 40 >&2
                 exit 1
               fi
             fi
