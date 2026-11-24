@@ -72,8 +72,8 @@ build() {
 ### Directory Naming Rule (Critical)
 
 The directory basename **should match** `name=` inside `Pkgfile`:
-- Good: `rolling/kernel/Pkgfile` with `name=kernel` (or `rolling/linux-6.18/Pkgfile` with `name=linux-6.18`).
-- Avoid: `rolling/linux-6.18/Pkgfile` declaring `name=kernel`. While `kpm` and `kryx-src` resolve mismatches safely via the canonical registry, `kryx-src lint` warns on them because stock CRUX tools expect `basename(dir) == name`.
+- Good: `pkg-tools/kpm/Pkgfile` with `name=kpm` (or `kernel/linux6.18/Pkgfile` when paired with `kryx-src` registry resolution).
+- Note: `kernel/linux6.18/Pkgfile` declares `name=kernel` so users install `kpm install kernel`. While `kpm` and `kryx-src` resolve dir-vs-name mismatches safely via the canonical registry, `kryx-src lint` warns on them because stock CRUX tools expect `basename(dir) == name`.
 
 ---
 

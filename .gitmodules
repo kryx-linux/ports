@@ -1,3 +1,0 @@
-[submodule "kernel/linux6.18"]
-	path = kernel/linux6.18
-	url = https://github.com/kryx-linux/kernel.git

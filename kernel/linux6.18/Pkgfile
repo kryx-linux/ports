@@ -1,0 +1,39 @@
+# Description: KryX Linux 6.18 LTS kernel (x86_64)
+# URL:         https://www.kernel.org/
+# Maintainer:  ezke5
+# Depends on:  kmod
+# Make depends on: bc bison flex openssl elfutils perl
+
+name=kernel
+version=6.18.64
+release=2
+source=(https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-$version.tar.xz
+        config)
+
+build() {
+	cd "$SRC/linux-$version"
+
+	# Prevent userspace compiler/linker flags exported by kpm.ini from interfering with Kbuild.
+	unset CFLAGS CXXFLAGS LDFLAGS
+
+	cp "$SRC/config" .config
+	make olddefconfig
+
+	make -j"$(nproc)" bzImage modules
+
+	local kver
+	kver="$(make -s kernelrelease)"
+
+	make INSTALL_MOD_PATH="$PKG" INSTALL_MOD_STRIP=1 modules_install
+
+	# Strip broken build/source symlinks pointing into the ephemeral $SRC work directory.
+	rm -f "$PKG"/lib/modules/*/build "$PKG"/lib/modules/*/source
+
+	install -d "$PKG/boot"
+	install -m 0644 arch/x86/boot/bzImage "$PKG/boot/vmlinuz-$kver"
+	install -m 0644 System.map "$PKG/boot/System.map-$kver"
+	install -m 0644 .config "$PKG/boot/config-$kver"
+	ln -sf "vmlinuz-$kver" "$PKG/boot/vmlinuz"
+	ln -sf "System.map-$kver" "$PKG/boot/System.map"
+	ln -sf "config-$kver" "$PKG/boot/config"
+}
