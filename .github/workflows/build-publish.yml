@@ -22,7 +22,7 @@ on:
         description: CRUX/KryX rolling container image reference
         type: string
         required: true
-        default: ghcr.io/kryx-linux/image:latest
+        default: ghcr.io/kryx-linux/iso:latest
       release_tag:
         description: Target GitHub Release tag in kryx-linux/ports
         type: string
@@ -82,7 +82,7 @@ jobs:
           for repo in core opt contrib xorg; do
             REPO_URL="https://github.com/kryx-linux/${repo}.git"
             TARGET_BRANCH=""
-            for candidate in 3.8 main 3.7; do
+            for candidate in main lts crux 3.8; do
               if git ls-remote --exit-code --heads "$REPO_URL" "$candidate" >/dev/null 2>&1; then
                 TARGET_BRANCH="$candidate"
                 break
@@ -166,7 +166,7 @@ jobs:
     needs: prepare
     runs-on: ubuntu-latest
     container:
-      image: ${{ inputs.image_ref || 'ghcr.io/kryx-linux/image:latest' }}
+      image: ${{ inputs.image_ref || 'ghcr.io/kryx-linux/iso:latest' }}
     outputs:
       matrix: ${{ steps.plan.outputs.matrix }}
       total_ports: ${{ steps.plan.outputs.total_ports }}
@@ -264,7 +264,7 @@ jobs:
       matrix:
         include: ${{ fromJson(needs.plan.outputs.matrix).include }}
     container:
-      image: ${{ inputs.image_ref || 'ghcr.io/kryx-linux/image:latest' }}
+      image: ${{ inputs.image_ref || 'ghcr.io/kryx-linux/iso:latest' }}
     steps:
       - name: Download port tree artifact
         uses: actions/download-artifact@v4

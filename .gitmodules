@@ -1,18 +1,6 @@
-[submodule "core"]
-	path = core
-	url = https://github.com/kryx-linux/core.git
-[submodule "opt"]
-	path = opt
-	url = https://github.com/kryx-linux/opt.git
-[submodule "contrib"]
-	path = contrib
-	url = https://github.com/kryx-linux/contrib.git
-[submodule "xorg"]
-	path = xorg
-	url = https://github.com/kryx-linux/xorg.git
 [submodule "rolling/gports"]
 	path = rolling/gports
 	url = https://github.com/kryx-linux/gports.git
 [submodule "rolling/linux-6.18"]
 	path = rolling/linux-6.18
-	url = https://github.com/crux-rolling/kernel
+	url = https://github.com/kryx-linux/kernel.git

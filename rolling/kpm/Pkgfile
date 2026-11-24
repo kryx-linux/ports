@@ -1,13 +1,13 @@
-# Description: Binary-first package manager and repository indexer for CRUX Linux
-# URL:         https://github.com/crux-rolling/pe
+# Description: Binary-first package manager, CRUX pkgutils/ports replacement, and repository indexer for KryX Linux
+# URL:         https://github.com/kryx-linux/kpm
 # Maintainer:  kryx-linux and contributors
-# Depends on:  go
+# Make depends on: go
 # Optional:    libarchive zstd xz bzip2 gzip curl
 
-name=pe
-version=0.5.3
+name=kpm
+version=0.6.0
 release=1
-source=(https://github.com/crux-rolling/$name/archive/v$version/$name-$version.tar.gz)
+source=(https://github.com/kryx-linux/$name/archive/v$version/$name-$version.tar.gz)
 
 build() {
 	cd "$name-$version"
