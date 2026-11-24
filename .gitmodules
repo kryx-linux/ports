@@ -1,6 +1,3 @@
-[submodule "rolling/gports"]
-	path = rolling/gports
-	url = https://github.com/kryx-linux/gports.git
 [submodule "rolling/linux-6.18"]
 	path = rolling/linux-6.18
 	url = https://github.com/kryx-linux/kernel.git

@@ -1,4 +1,4 @@
-# Description: Binary-first package manager, CRUX pkgutils/ports replacement, and repository indexer for KryX Linux
+# Description: Binary-first package manager, integrated pure-Go ports syncer, CRUX pkgutils replacement, and repo indexer for KryX Linux
 # URL:         https://github.com/kryx-linux/kpm
 # Maintainer:  kryx-linux and contributors
 # Make depends on: go
