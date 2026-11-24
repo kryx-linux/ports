@@ -1,6 +1,6 @@
 # Module 05: Automated CI & Matrix Builds with `kryx-src`
 
-`kryx-src` is KryX's unified `xbps-src`-style source machine (built alongside `pe` and `pe-index`).
+`kryx-src` is KryX's unified `xbps-src`-style source machine (built alongside `kpm` and `kpm-index`).
 
 ## Local Maintainer Workflow
 ```bash
@@ -16,7 +16,7 @@ kryx-src pkg \
   --work-root /tmp/kryx-work \
   --out-dir ./dist/packages \
   --deps --sync-index --force \
-  rolling/pe rolling/gports
+  rolling/kpm rolling/gports
 
 # 4. Stage index.json + GitHub-safe upload copies + Ed25519 signature
 kryx-src stage --packages ./dist/packages --ports /usr/ports --index ./dist/index.json --upload-dir ./dist/upload

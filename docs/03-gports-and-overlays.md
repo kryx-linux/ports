@@ -13,7 +13,7 @@ Don't fork 1,800+ upstream CRUX packages. Use the **overlay model**:
    git xorg    https://git.crux.nu/ports/xorg.git
    git contrib https://git.crux.nu/ports/contrib.git
    ```
-2. Put `rolling` **first** in `/etc/pe.ini`:
+2. Put `rolling` **first** in `/etc/kpm.ini`:
    ```ini
    collections = rolling, core, opt, xorg, contrib
    ```
@@ -27,6 +27,6 @@ gports -u               # Concurrently sync all collections (pure Go)
 gports -u -j 2 core opt # Sync specific collections with 2 workers
 gports status           # Show collection protocols, paths, and Git HEAD SHAs
 gports -l               # List local ports (<collection>/<port>)
-gports -d               # Diff local ports against installed pe DB (/var/lib/pkg/db)
+gports -d               # Diff local ports against installed kpm DB (/var/lib/pkg/db)
 gports -s kernel        # Fast local search across port names & descriptions
 ```

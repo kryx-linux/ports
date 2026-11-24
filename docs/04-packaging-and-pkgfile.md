@@ -26,9 +26,9 @@ build() {
 
 When you run:
 ```bash
-pe build --deps --sync mytool
+kpm build --deps --sync mytool
 ```
-- `pe` installs `go` **from the binary repo** (skipping `go`'s own build deps!).
+- `kpm` installs `go` **from the binary repo** (skipping `go`'s own build deps!).
 - The published binary package for `mytool` only lists `depends: ["glibc"]` — end-users installing `mytool` never pull in the Go compiler!
 - Stock CRUX `pkgmk` ignores `# Make depends on:`, keeping 100% backward compatibility.
 
@@ -37,9 +37,9 @@ Just like Nix's `flake.nix`, you can put a `Pkgfile` (or `.kryx/Pkgfile`) right 
 
 ```bash
 # Inside your project directory:
-pe build . --deps --install
+kpm build . --deps --install
 
 # Or directly from GitHub:
-pe build https://github.com/you/mytool@v1.0.0 --deps --install
+kpm build https://github.com/you/mytool@v1.0.0 --deps --install
 kryx-src pkg --from-git https://github.com/you/mytool@main --out-dir ./dist
 ```

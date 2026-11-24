@@ -2,7 +2,7 @@
 
 ## NAME
 
-**CONTRIBUTING_PACKAGES** — real-world specification and checklist for creating, testing, and maintaining CRUX/KryX Linux `Pkgfile` recipes with `pe(8)`, `kryx-src(8)`, and `gports(8)`.
+**CONTRIBUTING_PACKAGES** — real-world specification and checklist for creating, testing, and maintaining CRUX/KryX Linux `Pkgfile` recipes with `kpm(8)`, `kryx-src(8)`, and `gports(8)`.
 
 ---
 
@@ -11,7 +11,7 @@
 ```text
 <collection>/<pkgname>/
 ├── Pkgfile          # Required: metadata headers, variables, and build()
-├── .footprint       # Expected installed file tree (checked by pe build / kryx-src)
+├── .footprint       # Expected installed file tree (checked by kpm build / kryx-src)
 ├── .md5sum          # Source checksums (generated via pkgmk -um or md5sum)
 ├── .nostrip         # Optional: regex patterns excluded from ELF stripping
 └── <local files>    # Optional patches, configs, init scripts listed in source=()
@@ -27,8 +27,8 @@ my-project/
 
 Build directly with:
 ```bash
-pe build .
-pe build https://github.com/org/my-project@v1.2.0
+kpm build .
+kpm build https://github.com/org/my-project@v1.2.0
 kryx-src pkg --from-git https://github.com/org/my-project@main
 ```
 
@@ -63,28 +63,28 @@ build() {
 
 | Header | Required | Purpose |
 | :--- | :---: | :--- |
-| `# Description:` | Yes | Single-line summary used by `pe search`, `gports -s`, and `index.json`. |
+| `# Description:` | Yes | Single-line summary used by `kpm search`, `gports -s`, and `index.json`. |
 | `# URL:` | Yes | Upstream homepage URL. |
 | `# Maintainer:` | Yes | Maintainer contact (obfuscated email optional). |
-| `# Depends on:` | When needed | **Runtime** dependencies installed by `pe install --deps` and also satisfied during builds. |
-| `# Make depends on:` | Optional | **Build-time-only** dependencies (compilers, generators like `go`, `cmake`, `bison`). Backward-compatible with stock CRUX (ignored by `pkgmk`); satisfied binary-first by `pe build --deps --sync` / `kryx-src pkg --deps` and **excluded** from runtime `depends` in `index.json`. Aliases: `# Make depends:`, `# Makedepends:`, `# Build depends on:`. |
+| `# Depends on:` | When needed | **Runtime** dependencies installed by `kpm install --deps` and also satisfied during builds. |
+| `# Make depends on:` | Optional | **Build-time-only** dependencies (compilers, generators like `go`, `cmake`, `bison`). Backward-compatible with stock CRUX (ignored by `pkgmk`); satisfied binary-first by `kpm build --deps --sync` / `kryx-src pkg --deps` and **excluded** from runtime `depends` in `index.json`. Aliases: `# Make depends:`, `# Makedepends:`, `# Build depends on:`. |
 
 ### Directory Naming Rule (Critical)
 
 The directory basename **should match** `name=` inside `Pkgfile`:
 - Good: `rolling/kernel/Pkgfile` with `name=kernel` (or `rolling/linux-6.18/Pkgfile` with `name=linux-6.18`).
-- Avoid: `rolling/linux-6.18/Pkgfile` declaring `name=kernel`. While `pe` and `kryx-src` resolve mismatches safely via the canonical registry, `kryx-src lint` warns on them because stock CRUX tools expect `basename(dir) == name`.
+- Avoid: `rolling/linux-6.18/Pkgfile` declaring `name=kernel`. While `kpm` and `kryx-src` resolve mismatches safely via the canonical registry, `kryx-src lint` warns on them because stock CRUX tools expect `basename(dir) == name`.
 
 ---
 
 ## ENVIRONMENT VARIABLES PROVIDED TO `build()`
 
-`pe build` and `kryx-src pkg` export CRUX `pkgmk`-compatible variables:
+`kpm build` and `kryx-src pkg` export CRUX `pkgmk`-compatible variables:
 
 - `$SRC` — unpacked source directory (`<work_dir>/<name>/src`)
 - `$PKG` — staging rootfs directory archived into `.pkg.tar.zst` (`<work_dir>/<name>/pkg`)
 - `$PKGMK_ROOT` — directory containing `Pkgfile` (useful for Nix-like repo builds!)
-- `$JOBS`, `$CFLAGS`, `$CXXFLAGS`, `$LDFLAGS`, `$MAKEFLAGS` — from `/etc/pe.ini`
+- `$JOBS`, `$CFLAGS`, `$CXXFLAGS`, `$LDFLAGS`, `$MAKEFLAGS` — from `/etc/kpm.ini`
 
 ---
 
@@ -129,16 +129,16 @@ Never assume user edits in `/etc` should be overwritten on upgrade; `/etc/pkgadd
    ```
 2. **Build with binary-first runtime + make dependencies:**
    ```bash
-   pe build --deps --sync --update-footprint rolling/myport
+   kpm build --deps --sync --update-footprint rolling/myport
    ```
 3. **Verify clean footprint & archive contents:**
    ```bash
-   pe list --files /var/cache/pe/packages/myport#1.2.3-1.pkg.tar.zst
+   kpm list --files /var/cache/kpm/packages/myport#1.2.3-1.pkg.tar.zst
    ```
 4. **Test install in a temporary root (zero risk to host `/`):**
    ```bash
    mkdir -p /tmp/testroot/var/lib/pkg
-   pe --root /tmp/testroot install /var/cache/pe/packages/myport#1.2.3-1.pkg.tar.zst
+   kpm --root /tmp/testroot install /var/cache/kpm/packages/myport#1.2.3-1.pkg.tar.zst
    ```
 5. **Run CI test via GitHub Actions:**
    - Open **Actions → Build Packages with kryx-src (Matrix) and Publish Rolling Repo**.
@@ -150,5 +150,5 @@ Never assume user edits in `/etc` should be overwritten on upgrade; `/etc/pkgadd
 ## RELEASE SIGNING & KEY ROTATION
 
 - Maintainers sign `index.json` using an Ed25519 private key (`KRYX_SIGNING_KEY` secret in CI or `kryx-src sign --key release.key --file index.json`).
-- Public keys (`*.pub`, either `kryx-ed25519` or standard OpenSSH `ssh-ed25519`) live in `/etc/pe/keys.d/`.
-- **Always keep an offline backup keypair.** If a repository moves and the old private key is lost, generate a new key (`pe key gen`), publish the `.pub` + SHA-256 fingerprint, and instruct users to run `pe key trust <new.pub>` (and `pe key revoke <old-id>`).
+- Public keys (`*.pub`, either `kryx-ed25519` or standard OpenSSH `ssh-ed25519`) live in `/etc/kpm/keys.d/`.
+- **Always keep an offline backup keypair.** If a repository moves and the old private key is lost, generate a new key (`kpm key gen`), publish the `.pub` + SHA-256 fingerprint, and instruct users to run `kpm key trust <new.pub>` (and `kpm key revoke <old-id>`).

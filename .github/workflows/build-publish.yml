@@ -130,6 +130,7 @@ jobs:
             done
           fi
 
+          # Remove empty base collection stubs so cp -a never overwrites cloned base trees.
           for repo in core opt contrib xorg; do
             if [ -d "$repo" ] && [ -z "$(ls -A "$repo")" ]; then
               rmdir "$repo"
@@ -145,8 +146,6 @@ jobs:
           PORT_REPO: ${{ inputs.port_repo || 'kryx-linux/ports' }}
         run: |
           set -euo pipefail
-          echo "=== Checking wlroots location ==="
-          find port_src -maxdepth 3 -name "wlroots" -type d || true
           PKGFILE_COUNT="$(find port_src -name Pkgfile -type f | wc -l)"
           echo "Found $PKGFILE_COUNT total Pkgfile(s) across base collections and $PORT_REPO"
           if [ "$PKGFILE_COUNT" -eq 0 ]; then
@@ -192,8 +191,12 @@ jobs:
           rm -rf "$SRC_DIR"
           mkdir -p "$SRC_DIR"
           tar -xf "$GITHUB_WORKSPACE/port_bundle/port-src.tar" -C "$SRC_DIR"
+          export KRYX_PORTS_DIR="$SRC_DIR"
+          export KPM_PORTS_DIR="$SRC_DIR"
+
           read -r -a RAW_PORTS <<< "$PORT_PATH"
 
+          # Resolve bare port names (e.g. "wlroots" or "libinput") against the merged tree.
           TARGET_PORTS=()
           for item in "${RAW_PORTS[@]}"; do
             if [ "$item" = "all" ] || [ -d "$SRC_DIR/$item" ]; then
@@ -215,7 +218,7 @@ jobs:
 
           if [ -x /usr/bin/kryx-src ]; then
             PLAN_JSON="$(/usr/bin/kryx-src plan \
-              --ports "$SRC_DIR" \
+              --ports-dir "$SRC_DIR" \
               --port-repo "$PORT_REPO" \
               --max-ports "$MAX_PORTS" \
               --chunk-size "$CHUNK_SIZE" \
@@ -239,10 +242,15 @@ jobs:
             ESC_PATH="${TARGET_PORTS[*]//\\/\\\\}"
             ESC_PATH="${ESC_PATH//\"/\\\"}"
             FALLBACK="{\"total_ports\":1,\"truncated\":false,\"include\":[{\"id\":\"batch\",\"wave\":0,\"ports\":[\"$ESC_PATH\"],\"port_arg\":\"$ESC_PATH\",\"pkg_names\":[]}]}"
-            echo "matrix=$FALLBACK" >> "$GITHUB_OUTPUT"
+            {
+              echo "matrix<<__KRYX_MATRIX_EOF__"
+              printf '%s\n' "$FALLBACK"
+              echo "__KRYX_MATRIX_EOF__"
+            } >> "$GITHUB_OUTPUT"
             echo "total_ports=1" >> "$GITHUB_OUTPUT"
             echo "truncated=false" >> "$GITHUB_OUTPUT"
           fi
+
   build:
     needs: [prepare, plan]
     # Skip (instead of failing strategy evaluation) when the plan resolved zero jobs.
@@ -284,12 +292,21 @@ jobs:
           mkdir -p "$RAW_PORT_SRC" "$PKG_DIR" "$OUT_DIR/bin"
 
           tar -xf "$GITHUB_WORKSPACE/port_bundle/port-src.tar" -C "$RAW_PORT_SRC"
+
+          # Symlink /usr/ports to the extracted merged tree so Pkgfiles calling
+          # `prt-get isinst` or expecting /usr/ports/{core,opt,xorg,contrib} succeed.
+          rm -rf /usr/ports
+          ln -s "$RAW_PORT_SRC" /usr/ports
+
+          export KRYX_PORTS_DIR="$RAW_PORT_SRC"
+          export KPM_PORTS_DIR="$RAW_PORT_SRC"
+
           read -r -a TARGET_PORTS <<< "$JOB_PORTS"
 
           if [ -x /usr/bin/kryx-src ]; then
-            /usr/bin/kryx-src lint --ports "$RAW_PORT_SRC" "${TARGET_PORTS[@]}" || true
+            /usr/bin/kryx-src lint --ports-dir "$RAW_PORT_SRC" "${TARGET_PORTS[@]}" || true
             SRC_FLAGS=(
-              --ports "$RAW_PORT_SRC"
+              --ports-dir "$RAW_PORT_SRC"
               --port-repo "$PORT_REPO"
               --work-root "$WORK_ROOT"
               --out-dir "$PKG_DIR"
@@ -312,8 +329,8 @@ jobs:
             chmod 0755 "$OUT_DIR/bin/kryx-src"
           else
             mkdir -p "$WORK_ROOT/cache" "$WORK_ROOT/sources" "$WORK_ROOT/work"
-            PE_CONF="$WORK_ROOT/pe.ci.ini"
-            cat > "$PE_CONF" <<EOF
+            KPM_CONF="$WORK_ROOT/kpm.ci.ini"
+            cat > "$KPM_CONF" <<EOF
           [paths]
           root = /
           ports_dir = $RAW_PORT_SRC
@@ -352,7 +369,7 @@ jobs:
             [ "$SOURCE_DEPS" = "true" ] && BUILD_FLAGS+=(--source-deps)
             [ "$IGNORE_FOOTPRINT" = "true" ] && BUILD_FLAGS+=(--ignore-footprint)
             [ "$IGNORE_MD5SUM" = "true" ] && BUILD_FLAGS+=(--ignore-md5sum)
-            /usr/bin/pe --config "$PE_CONF" build "${BUILD_FLAGS[@]}" "${TARGET_PORTS[@]}"
+            /usr/bin/kpm --config "$KPM_CONF" build "${BUILD_FLAGS[@]}" "${TARGET_PORTS[@]}"
           fi
 
           shopt -s nullglob
@@ -363,8 +380,8 @@ jobs:
           fi
           ls -lh "${BUILT[@]}"
 
-          cp -f /usr/bin/pe-index "$OUT_DIR/bin/pe-index"
-          chmod 0755 "$OUT_DIR/bin/pe-index"
+          cp -f /usr/bin/kpm-index "$OUT_DIR/bin/kpm-index"
+          chmod 0755 "$OUT_DIR/bin/kpm-index"
 
           SAFE_ID="$(printf '%s' "$JOB_ID" | tr '/: ' '---')"
           echo "SAFE_ID=$SAFE_ID" >> "$GITHUB_ENV"
@@ -373,7 +390,7 @@ jobs:
       - name: Upload built package bundle
         uses: actions/upload-artifact@v4
         with:
-          name: pe-built-${{ env.SAFE_ID }}
+          name: kpm-built-${{ env.SAFE_ID }}
           path: dist/bundle-*.tar
           retention-days: 1
 
@@ -391,7 +408,7 @@ jobs:
       - name: Download all built matrix package bundles
         uses: actions/download-artifact@v4
         with:
-          pattern: pe-built-*
+          pattern: kpm-built-*
           path: bundles
           merge-multiple: true
 
@@ -419,12 +436,14 @@ jobs:
             tar -xf "$b" -C "$STAGE_DIR"
           done
           tar -xf port_bundle/port-src.tar -C "$RAW_PORT_SRC"
+          export KRYX_PORTS_DIR="$RAW_PORT_SRC"
+          export KPM_PORTS_DIR="$RAW_PORT_SRC"
 
           if ! gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             gh release create "$RELEASE_TAG" \
               --repo "$GITHUB_REPOSITORY" \
               --title "Rolling x86_64 Packages" \
-              --notes "Automated rolling x86_64 CRUX/KryX binary packages and pe-index metadata."
+              --notes "Automated rolling x86_64 CRUX/KryX binary packages and kpm-index metadata."
           fi
 
           gh release download "$RELEASE_TAG" \
@@ -436,7 +455,7 @@ jobs:
           if [ -x "$STAGE_DIR/bin/kryx-src" ]; then
             "$STAGE_DIR/bin/kryx-src" stage \
               --packages "$STAGE_DIR/packages" \
-              --ports "$RAW_PORT_SRC" \
+              --ports-dir "$RAW_PORT_SRC" \
               --index "$STAGE_DIR/index.json" \
               --upload-dir "$UPLOAD_DIR" \
               --arch "$TARGET_ARCH" \
@@ -455,13 +474,13 @@ jobs:
               --assets-json "$STAGE_DIR/assets.json" \
               --packages "$STAGE_DIR/packages"
 
-            # Optional Ed25519 signing when KRYX_SIGNING_KEY secret is configured.
+            # Optional signify/Ed25519 signing when KRYX_SIGNING_KEY secret is configured.
             META_FILES=("$STAGE_DIR/index.json")
             if [ -n "${KRYX_SIGNING_KEY:-}" ]; then
               KEY_FILE="$STAGE_DIR/signing.key"
               printf '%s\n' "$KRYX_SIGNING_KEY" > "$KEY_FILE"
               chmod 0600 "$KEY_FILE"
-              "$STAGE_DIR/bin/kryx-src" sign --key "$KEY_FILE" --file "$STAGE_DIR/index.json"
+              "$STAGE_DIR/bin/kryx-src" sign --signify --key "$KEY_FILE" --file "$STAGE_DIR/index.json"
               rm -f "$KEY_FILE"
               META_FILES+=("$STAGE_DIR/index.json.sig")
             fi
@@ -471,13 +490,15 @@ jobs:
               "${META_FILES[@]}" \
               --clobber
           else
-            chmod 0755 "$STAGE_DIR/bin/pe-index"
-            "$STAGE_DIR/bin/pe-index" \
-              --packages "$STAGE_DIR/packages" \
-              --index "$STAGE_DIR/index.json" \
-              --ports "$RAW_PORT_SRC" \
-              --arch "$TARGET_ARCH" \
+            chmod 0755 "$STAGE_DIR/bin/kpm-index"
+            INDEX_ARGS=(
+              --packages "$STAGE_DIR/packages"
+              --index "$STAGE_DIR/index.json"
+              --ports-dir "$RAW_PORT_SRC"
+              --arch "$TARGET_ARCH"
               --base-url "https://github.com/${GITHUB_REPOSITORY}/releases/download/${RELEASE_TAG}"
+            )
+            "$STAGE_DIR/bin/kpm-index" "${INDEX_ARGS[@]}"
 
             ARCHIVES=("$STAGE_DIR/packages"/*.pkg.tar.*)
             UPLOAD_FILES=()
@@ -501,7 +522,17 @@ jobs:
               )
             ' "$STAGE_DIR/index.json" > "$STAGE_DIR/index.json.tmp"
             mv "$STAGE_DIR/index.json.tmp" "$STAGE_DIR/index.json"
-            gh release upload "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" "$STAGE_DIR/index.json" --clobber
+
+            META_FILES=("$STAGE_DIR/index.json")
+            if [ -n "${KRYX_SIGNING_KEY:-}" ]; then
+              KEY_FILE="$STAGE_DIR/signing.key"
+              printf '%s\n' "$KRYX_SIGNING_KEY" > "$KEY_FILE"
+              chmod 0600 "$KEY_FILE"
+              "$STAGE_DIR/bin/kpm-index" "${INDEX_ARGS[@]}" --sign-key "$KEY_FILE"
+              rm -f "$KEY_FILE"
+              META_FILES+=("$STAGE_DIR/index.json.sig")
+            fi
+            gh release upload "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" "${META_FILES[@]}" --clobber
           fi
 
           if [ "${{ needs.plan.outputs.truncated }}" = "true" ]; then
