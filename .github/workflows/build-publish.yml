@@ -90,11 +90,11 @@ jobs:
   prepare:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout base collection repositories (core, opt, contrib, xorg)
+      - name: Checkout base collection repositories (core, opt, contrib, xorg, compat-32)
         run: |
           set -euo pipefail
           mkdir -p port_src
-          for repo in core opt contrib xorg; do
+          for repo in core opt contrib xorg compat-32; do
             REPO_URL="https://github.com/kryx-linux/${repo}.git"
             TARGET_BRANCH=""
             for candidate in main lts crux 3.8; do
@@ -146,7 +146,7 @@ jobs:
           fi
 
           # Remove empty base collection stubs so cp -a never overwrites cloned base trees.
-          for repo in core opt contrib xorg; do
+          for repo in core opt contrib xorg compat-32; do
             if [ -d "$repo" ] && [ -z "$(ls -A "$repo")" ]; then
               rmdir "$repo"
             fi
