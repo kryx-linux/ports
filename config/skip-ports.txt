@@ -1,0 +1,9 @@
+# ports/config/skip-ports.txt
+# Quarantined ports whose dependencies live outside KryX's 6 active collections
+# (e.g. CRUX compat-32 multilib-32 packages or unpackaged KDE KF6 modules).
+contrib/easyeffects          # missing: kirigami-addons, qqc2-desktop-style
+contrib/nextcloud-client     # missing: karchive
+contrib/steam                # missing: compat-32 (*-32)
+contrib/steam-native-runtime # missing: compat-32 (*-32)
+contrib/wine-staging         # missing: compat-32 (*-32)
+contrib/winetricks           # missing: wine

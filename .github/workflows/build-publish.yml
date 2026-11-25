@@ -42,7 +42,22 @@ on:
         description: Also resolve and satisfy recursive Pkgfile runtime + make deps (--deps)
         type: boolean
         required: false
-        default: false
+        default: true
+      wave:
+        description: Target topological wave (-1 = all waves, 0..25 = single wave)
+        type: string
+        required: false
+        default: "-1"
+      skip_indexed:
+        description: Skip ports whose exact version-release is already published in index.json
+        type: boolean
+        required: false
+        default: true
+      shard_releases:
+        description: Shard uploads across rolling-x86_64-{kryx,core,opt,xorg,contrib-am,contrib-nz} (avoids 1000-asset GitHub limit)
+        type: boolean
+        required: false
+        default: true
       source_deps:
         description: Build missing dependencies from source instead of reusing binary index (--source-deps)
         type: boolean
@@ -183,8 +198,12 @@ jobs:
         env:
           PORT_REPO: ${{ inputs.port_repo || 'kryx-linux/ports' }}
           PORT_PATH: ${{ inputs.port_path || 'kernel' }}
+          RELEASE_TAG: ${{ inputs.release_tag || 'rolling-x86_64' }}
           MAX_PORTS: ${{ inputs.max_ports || '20' }}
           CHUNK_SIZE: ${{ inputs.chunk_size || '1' }}
+          BUILD_DEPS: ${{ inputs.build_deps }}
+          WAVE_FILTER: ${{ inputs.wave || '-1' }}
+          SKIP_INDEXED: ${{ inputs.skip_indexed }}
         run: |
           set -euo pipefail
           SRC_DIR="$RUNNER_TEMP/plan-src"
@@ -237,13 +256,29 @@ jobs:
           done
 
           if [ -x /usr/bin/kryx-src ]; then
-            PLAN_JSON="$(/usr/bin/kryx-src plan \
-              --ports-dir "$SRC_DIR" \
-              --port-repo "$PORT_REPO" \
-              --max-ports "$MAX_PORTS" \
-              --chunk-size "$CHUNK_SIZE" \
-              --compact \
-              "${TARGET_PORTS[@]}")"
+            PLAN_FLAGS=(
+              --ports-dir "$SRC_DIR"
+              --port-repo "$PORT_REPO"
+              --max-ports "$MAX_PORTS"
+              --chunk-size "$CHUNK_SIZE"
+              --compact
+            )
+            # Use advanced wave/features/skip/skip-indexed flags when supported by kryx-src.
+            PLAN_HELP="$(/usr/bin/kryx-src plan --help 2>&1 || true)"
+            if printf '%s' "$PLAN_HELP" | grep -q -- '--wave'; then
+              PLAN_FLAGS+=(--wave "$WAVE_FILTER")
+              [ "$BUILD_DEPS" = "true" ] && PLAN_FLAGS+=(--with-deps)
+              [ -f "$SRC_DIR/config/build-features.ini" ] && PLAN_FLAGS+=(--features-file "$SRC_DIR/config/build-features.ini")
+              [ -f "$SRC_DIR/config/skip-ports.txt" ] && PLAN_FLAGS+=(--skip-file "$SRC_DIR/config/skip-ports.txt")
+              if [ "$SKIP_INDEXED" = "true" ]; then
+                INDEX_TMP="$RUNNER_TEMP/current-index.json"
+                if curl -fsSL "https://github.com/${GITHUB_REPOSITORY}/releases/download/${RELEASE_TAG}/index.json" -o "$INDEX_TMP" 2>/dev/null; then
+                  PLAN_FLAGS+=(--skip-indexed "$INDEX_TMP")
+                fi
+              fi
+            fi
+
+            PLAN_JSON="$(/usr/bin/kryx-src plan "${PLAN_FLAGS[@]}" "${TARGET_PORTS[@]}")"
             echo "Plan JSON: $PLAN_JSON"
             {
               echo "matrix<<__KRYX_MATRIX_EOF__"
@@ -342,9 +377,26 @@ jobs:
             [ "$SOURCE_DEPS" = "true" ] && SRC_FLAGS+=(--source-deps)
             [ "$IGNORE_FOOTPRINT" = "true" ] && SRC_FLAGS+=(--ignore-footprint)
             [ "$IGNORE_MD5SUM" = "true" ] && SRC_FLAGS+=(--ignore-md5sum)
+            if [ -f "$RAW_PORT_SRC/config/build-features.ini" ] && /usr/bin/kryx-src pkg --help 2>&1 | grep -q -- '--features-file'; then
+              SRC_FLAGS+=(--features-file "$RAW_PORT_SRC/config/build-features.ini")
+            fi
 
             echo "=== Matrix job [$JOB_ID]: kryx-src pkg ${TARGET_PORTS[*]} ==="
             /usr/bin/kryx-src pkg "${SRC_FLAGS[@]}" "${TARGET_PORTS[@]}"
+
+            # Capture ELF DT_NEEDED + shebang auto-discovered runtime deps while all build deps
+            # are still installed in this container's /var/lib/pkg/db.
+            if /usr/bin/kryx-src stage --help 2>&1 | grep -q -- '--audit-root'; then
+              mkdir -p "$OUT_DIR/meta"
+              /usr/bin/kryx-src stage \
+                --packages "$PKG_DIR" \
+                --ports-dir "$RAW_PORT_SRC" \
+                --index "$OUT_DIR/meta/audit-${JOB_ID//\//-}.json" \
+                --arch x86_64 \
+                --audit-root / \
+                --base-url "https://github.com/${GITHUB_REPOSITORY}/releases/download/${RELEASE_TAG}"
+            fi
+
             cp -f /usr/bin/kryx-src "$OUT_DIR/bin/kryx-src"
             chmod 0755 "$OUT_DIR/bin/kryx-src"
           else
@@ -405,7 +457,8 @@ jobs:
 
           SAFE_ID="$(printf '%s' "$JOB_ID" | tr '/: ' '---')"
           echo "SAFE_ID=$SAFE_ID" >> "$GITHUB_ENV"
-          tar -cf "$OUT_DIR/bundle-${SAFE_ID}.tar" -C "$OUT_DIR" packages bin
+          mkdir -p "$OUT_DIR/meta"
+          tar -cf "$OUT_DIR/bundle-${SAFE_ID}.tar" -C "$OUT_DIR" packages bin meta
 
       - name: Upload built package bundle
         uses: actions/upload-artifact@v4
@@ -437,6 +490,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           KRYX_SIGNING_KEY: ${{ secrets.KRYX_SIGNING_KEY }}
           RELEASE_TAG: ${{ inputs.release_tag || 'rolling-x86_64' }}
+          SHARD_RELEASES: ${{ inputs.shard_releases }}
           TARGET_ARCH: x86_64
         run: |
           set -euo pipefail
@@ -444,7 +498,7 @@ jobs:
           UPLOAD_DIR="$STAGE_DIR/upload"
           RAW_PORT_SRC="$STAGE_DIR/port_src"
           rm -rf "$STAGE_DIR"
-          mkdir -p "$STAGE_DIR/packages" "$STAGE_DIR/bin" "$UPLOAD_DIR" "$RAW_PORT_SRC"
+          mkdir -p "$STAGE_DIR/packages" "$STAGE_DIR/bin" "$STAGE_DIR/meta" "$UPLOAD_DIR" "$RAW_PORT_SRC"
 
           shopt -s nullglob
           TAR_LIST=(bundles/bundle-*.tar)
@@ -459,12 +513,17 @@ jobs:
           export KRYX_PORTS_DIR="$RAW_PORT_SRC"
           export KPM_PORTS_DIR="$RAW_PORT_SRC"
 
-          if ! gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            gh release create "$RELEASE_TAG" \
-              --repo "$GITHUB_REPOSITORY" \
-              --title "Rolling x86_64 Packages" \
-              --notes "Automated rolling x86_64 CRUX/KryX binary packages and kpm-index metadata."
-          fi
+          ensure_release() {
+            local tag="$1" title="$2"
+            if ! gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+              gh release create "$tag" \
+                --repo "$GITHUB_REPOSITORY" \
+                --title "$title" \
+                --notes "Automated KryX Linux rolling x86_64 binary packages."
+            fi
+          }
+
+          ensure_release "$RELEASE_TAG" "Rolling x86_64 Packages (Index)"
 
           gh release download "$RELEASE_TAG" \
             --repo "$GITHUB_REPOSITORY" \
@@ -481,13 +540,85 @@ jobs:
               --arch "$TARGET_ARCH" \
               --base-url "https://github.com/${GITHUB_REPOSITORY}/releases/download/${RELEASE_TAG}"
 
-            UPLOAD_FILES=("$UPLOAD_DIR"/*)
-            gh release upload "$RELEASE_TAG" \
-              --repo "$GITHUB_REPOSITORY" \
-              "${UPLOAD_FILES[@]}" \
-              --clobber
+            # Merge auto-discovered ELF DT_NEEDED + shebang runtime deps from per-job container audits.
+            AUDIT_FILES=("$STAGE_DIR"/meta/audit-*.json)
+            if [ "${#AUDIT_FILES[@]}" -gt 0 ]; then
+              python3 - "$STAGE_DIR/index.json" "${AUDIT_FILES[@]}" <<'PY'
+          import json, sys
+          idx_path = sys.argv[1]
+          idx = json.load(open(idx_path))
+          for mf in sys.argv[2:]:
+              m = json.load(open(mf))
+              for pkg, grp in m.get("packages", {}).items():
+                  if pkg not in idx.get("packages", {}):
+                      continue
+                  by_fn = {v["filename"]: v.get("depends", []) for v in grp.get("versions", [])}
+                  for v in idx["packages"][pkg].get("versions", []):
+                      extra = by_fn.get(v["filename"])
+                      if extra:
+                          merged = list(dict.fromkeys((v.get("depends") or []) + extra))
+                          v["depends"] = merged
+          with open(idx_path, "w") as f:
+              json.dump(idx, f, indent=2)
+              f.write("\n")
+          PY
+            fi
 
-            gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json assets > "$STAGE_DIR/assets.json"
+            if [ "$SHARD_RELEASES" = "true" ] && "$STAGE_DIR/bin/kryx-src" shard-tag --help >/dev/null 2>&1; then
+              # Group upload files by collection shard tag to stay below GitHub's 1000-asset/release limit.
+              mkdir -p "$STAGE_DIR/shards"
+              python3 - "$STAGE_DIR/index.json" "$STAGE_DIR/packages" "$UPLOAD_DIR" "$STAGE_DIR/shards" "$RELEASE_TAG" "$STAGE_DIR/bin/kryx-src" <<'PY'
+          import json, os, shutil, subprocess, sys
+          idx = json.load(open(sys.argv[1]))
+          pkg_dir, upload_dir, shards_dir, base_tag, ksrc = sys.argv[2:7]
+          col_by_fn = {}
+          pkg_by_fn = {}
+          for pkg, grp in idx.get("packages", {}).items():
+              for v in grp.get("versions", []):
+                  col_by_fn[v["filename"]] = v.get("collection", "")
+                  pkg_by_fn[v["filename"]] = pkg
+          for fn in sorted(os.listdir(pkg_dir)):
+              if ".pkg.tar." not in fn:
+                  continue
+              safe = fn.replace("#", ".")
+              src = os.path.join(upload_dir, safe)
+              if not os.path.isfile(src):
+                  continue
+              col = col_by_fn.get(fn, "")
+              pkg = pkg_by_fn.get(fn, fn.split("#", 1)[0])
+              tag = subprocess.check_output([ksrc, "shard-tag", "--base-tag", base_tag, "--collection", col, "--pkg", pkg], text=True).strip()
+              dst_dir = os.path.join(shards_dir, tag)
+              os.makedirs(dst_dir, exist_ok=True)
+              shutil.copy2(src, os.path.join(dst_dir, safe))
+          PY
+
+              ALL_ASSETS="$STAGE_DIR/assets.json"
+              echo '{"assets":[]}' > "$ALL_ASSETS"
+              for shard_dir in "$STAGE_DIR"/shards/*; do
+                [ -d "$shard_dir" ] || continue
+                shard_tag="$(basename "$shard_dir")"
+                ensure_release "$shard_tag" "Rolling x86_64 Shard (${shard_tag})"
+                SHARD_FILES=("$shard_dir"/*)
+                [ "${#SHARD_FILES[@]}" -eq 0 ] && continue
+                echo "Uploading ${#SHARD_FILES[@]} package(s) to shard release ${shard_tag}..."
+                gh release upload "$shard_tag" --repo "$GITHUB_REPOSITORY" "${SHARD_FILES[@]}" --clobber
+                gh release view "$shard_tag" --repo "$GITHUB_REPOSITORY" --json assets > "$STAGE_DIR/shard-assets.json"
+                python3 - "$ALL_ASSETS" "$STAGE_DIR/shard-assets.json" <<'PY'
+          import json, sys
+          a = json.load(open(sys.argv[1]))
+          b = json.load(open(sys.argv[2]))
+          a["assets"].extend(b.get("assets", []))
+          json.dump(a, open(sys.argv[1], "w"))
+          PY
+              done
+            else
+              UPLOAD_FILES=("$UPLOAD_DIR"/*)
+              gh release upload "$RELEASE_TAG" \
+                --repo "$GITHUB_REPOSITORY" \
+                "${UPLOAD_FILES[@]}" \
+                --clobber
+              gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json assets > "$STAGE_DIR/assets.json"
+            fi
 
             "$STAGE_DIR/bin/kryx-src" rewrite-urls \
               --index "$STAGE_DIR/index.json" \
