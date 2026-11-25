@@ -1,0 +1,8 @@
+# DHCP client daemon (foreground supervised mode)
+type            = process
+command         = /sbin/dhcpcd -B
+restart         = true
+smooth-recovery = true
+depends-on      = local-fs
+depends-on      = udev-trigger
+waits-for       = lo

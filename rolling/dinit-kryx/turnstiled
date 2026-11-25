@@ -1,0 +1,7 @@
+# Turnstile session & per-user dinit service manager daemon
+type            = process
+command         = /usr/bin/turnstiled
+restart         = true
+smooth-recovery = true
+depends-on      = dbus
+depends-on      = local-fs

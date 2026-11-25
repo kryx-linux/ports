@@ -1,0 +1,7 @@
+# Chrony NTP time synchronization daemon
+type            = process
+command         = /usr/sbin/chronyd -d
+restart         = true
+smooth-recovery = true
+depends-on      = local-fs
+waits-for       = lo

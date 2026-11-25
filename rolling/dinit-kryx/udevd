@@ -1,0 +1,5 @@
+type            = process
+command         = /sbin/udevd
+restart         = true
+smooth-recovery = true
+depends-on      = early-filesystems

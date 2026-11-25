@@ -1,0 +1,6 @@
+# CRUX /etc/rc.conf + /etc/rc.d/* compatibility bridge for legacy services
+type         = scripted
+command      = /usr/libexec/dinit-kryx/rc-compat start
+stop-command = /usr/libexec/dinit-kryx/rc-compat stop
+depends-on   = local-fs
+depends-on   = lo

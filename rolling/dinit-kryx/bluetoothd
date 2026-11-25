@@ -1,0 +1,7 @@
+# BlueZ Bluetooth daemon
+type            = process
+command         = /usr/lib/bluetooth/bluetoothd -n
+restart         = true
+smooth-recovery = true
+depends-on      = dbus
+depends-on      = udev-trigger

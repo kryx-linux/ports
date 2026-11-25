@@ -1,0 +1,22 @@
+# Description: Modern, lightweight supervising init system and DAG service manager (non-systemd)
+# URL:         https://davmac.org/projects/dinit/
+# Maintainer:  kryx-linux and contributors
+
+name=dinit
+version=0.22.1
+release=1
+source=(https://github.com/davmac314/$name/archive/v$version/$name-$version.tar.gz)
+
+build() {
+	cd "$name-$version"
+
+	# Prefix shutdown/reboot/halt/poweroff with `dinit-` so dinit coexists
+	# cleanly alongside core/sysvinit with zero file conflicts (dual-init safe).
+	./configure \
+		--prefix=/usr \
+		--sbindir=/usr/sbin \
+		--shutdown-prefix=dinit-
+
+	make CXX="${CXX:-g++}" CXXOPTS="${CXXFLAGS:--O2 -march=x86-64 -pipe}"
+	make DESTDIR="$PKG" install
+}

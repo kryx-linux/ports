@@ -1,0 +1,83 @@
+# Description: KryX Linux dinit boot DAG, supervised services, CRUX rc.d compatibility bridge, and kryx-init switcher
+# URL:         https://github.com/kryx-linux/ports
+# Maintainer:  kryx-linux and contributors
+# Depends on:  dinit eudev iproute2 util-linux
+# Optional:    dbus iwd dhcpcd seatd turnstile openssh chrony bluez
+
+name=dinit-kryx
+version=0.1.0
+release=1
+source=(
+	boot
+	early-filesystems
+	udevd
+	udev-trigger
+	local-fs
+	hostname
+	lo
+	gettys
+	dbus
+	iwd
+	dhcpcd
+	seatd
+	turnstiled
+	sshd
+	chronyd
+	bluetoothd
+	rc-compat
+	early-filesystems.sh
+	local-fs.sh
+	hostname.sh
+	rc-compat.sh
+	kryx-init
+	dinit-kryx.profile.sh
+)
+
+build() {
+	install -d \
+		"$PKG/etc/dinit.d/boot.d" \
+		"$PKG/etc/profile.d" \
+		"$PKG/usr/libexec/dinit-kryx/bin" \
+		"$PKG/usr/sbin"
+
+	# Core boot target and service definitions
+	for svc in boot early-filesystems udevd udev-trigger local-fs hostname lo gettys \
+	           dbus iwd dhcpcd seatd turnstiled sshd chronyd bluetoothd rc-compat; do
+		install -m 0644 "$SRC/$svc" "$PKG/etc/dinit.d/$svc"
+	done
+
+	# Generate supervised tty1..tty6 getty services
+	for n in 1 2 3 4 5 6; do
+		cat > "$PKG/etc/dinit.d/getty-tty${n}" <<EOF
+type            = process
+command         = /sbin/agetty --noclear 38400 tty${n} linux
+restart         = true
+depends-on      = local-fs
+termsignal      = HUP
+smooth-recovery = true
+inittab-id      = ${n}
+inittab-line    = tty${n}
+EOF
+		chmod 0644 "$PKG/etc/dinit.d/getty-tty${n}"
+	done
+
+	# Default enabled laptop/network services (skipped cleanly if binary not installed)
+	for def_svc in dbus iwd dhcpcd; do
+		ln -sf "../${def_svc}" "$PKG/etc/dinit.d/boot.d/${def_svc}"
+	done
+
+	# Helper scripts
+	install -m 0755 "$SRC/early-filesystems.sh" "$PKG/usr/libexec/dinit-kryx/early-filesystems"
+	install -m 0755 "$SRC/local-fs.sh"          "$PKG/usr/libexec/dinit-kryx/local-fs"
+	install -m 0755 "$SRC/hostname.sh"          "$PKG/usr/libexec/dinit-kryx/hostname"
+	install -m 0755 "$SRC/rc-compat.sh"         "$PKG/usr/libexec/dinit-kryx/rc-compat"
+
+	# Non-conflicting dinit power/reboot command shims activated ONLY when PID 1 is dinit
+	ln -sf /usr/sbin/dinit-shutdown "$PKG/usr/libexec/dinit-kryx/bin/shutdown"
+	ln -sf /usr/sbin/dinit-reboot   "$PKG/usr/libexec/dinit-kryx/bin/reboot"
+	ln -sf /usr/sbin/dinit-poweroff "$PKG/usr/libexec/dinit-kryx/bin/poweroff"
+	ln -sf /usr/sbin/dinit-halt     "$PKG/usr/libexec/dinit-kryx/bin/halt"
+
+	install -m 0644 "$SRC/dinit-kryx.profile.sh" "$PKG/etc/profile.d/dinit-kryx.sh"
+	install -m 0755 "$SRC/kryx-init"             "$PKG/usr/sbin/kryx-init"
+}

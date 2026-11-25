@@ -1,0 +1,41 @@
+# Description: Service-manager-agnostic session tracker and XDG_RUNTIME_DIR/user-service manager (pairs with dinit)
+# URL:         https://github.com/chimera-linux/turnstile
+# Maintainer:  kryx-linux and contributors
+# Depends on:  linux-pam dinit
+# Make depends on: meson ninja
+
+name=turnstile
+version=0.1.11
+release=1
+source=(https://github.com/chimera-linux/$name/archive/v$version/$name-$version.tar.gz)
+
+build() {
+	cd "$name-$version"
+
+	local extra_opts=()
+	if grep -q "'pamdir'" meson_options.txt meson.options 2>/dev/null; then
+		extra_opts+=("-Dpamdir=/lib/security")
+	elif grep -q "'pam_moddir'" meson_options.txt meson.options 2>/dev/null; then
+		extra_opts+=("-Dpam_moddir=/lib/security")
+	fi
+	if grep -q "'manage_rundir'" meson_options.txt meson.options 2>/dev/null; then
+		extra_opts+=("-Dmanage_rundir=true")
+	fi
+
+	meson setup build \
+		--prefix=/usr \
+		--sysconfdir=/etc \
+		--libexecdir=lib \
+		--buildtype=plain \
+		"${extra_opts[@]}"
+
+	meson compile -C build
+	DESTDIR="$PKG" meson install -C build
+
+	# Ensure pam_turnstile.so resides in CRUX's canonical /lib/security directory.
+	if [ -f "$PKG/usr/lib/security/pam_turnstile.so" ] && [ ! -f "$PKG/lib/security/pam_turnstile.so" ]; then
+		install -d "$PKG/lib/security"
+		mv "$PKG/usr/lib/security/pam_turnstile.so" "$PKG/lib/security/pam_turnstile.so"
+		rmdir -p "$PKG/usr/lib/security" 2>/dev/null || true
+	fi
+}

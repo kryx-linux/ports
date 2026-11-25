@@ -1,0 +1,10 @@
+# Top-level KryX Linux dinit boot target
+type         = internal
+depends-on   = early-filesystems
+depends-on   = udev-trigger
+depends-on   = local-fs
+depends-on   = hostname
+depends-on   = lo
+depends-on   = gettys
+waits-for    = rc-compat
+waits-for.d  = /etc/dinit.d/boot.d

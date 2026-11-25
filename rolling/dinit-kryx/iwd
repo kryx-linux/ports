@@ -1,0 +1,8 @@
+# Intel iwd wireless daemon (supervised; waits for D-Bus readiness + udev)
+type            = process
+command         = /bin/sh -c 'mkdir -p /run/iwd /var/lib/iwd /etc/iwd; chmod 0700 /var/lib/iwd /etc/iwd; command -v rfkill >/dev/null 2>&1 && rfkill unblock wifi 2>/dev/null || true; exec /usr/sbin/iwd'
+restart         = true
+smooth-recovery = true
+depends-on      = dbus
+depends-on      = udev-trigger
+waits-for       = lo

@@ -1,0 +1,7 @@
+# OpenSSH daemon (foreground supervised mode)
+type            = process
+command         = /bin/sh -c 'mkdir -p /var/empty /run/sshd; [ -x /usr/bin/ssh-keygen ] && /usr/bin/ssh-keygen -A 2>/dev/null || true; exec /usr/sbin/sshd -D'
+restart         = true
+smooth-recovery = true
+depends-on      = local-fs
+waits-for       = lo

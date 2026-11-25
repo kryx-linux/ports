@@ -1,0 +1,6 @@
+# Minimal seat management daemon for Wayland/Sway (no elogind/systemd)
+type            = process
+command         = /usr/bin/seatd -g video
+restart         = true
+smooth-recovery = true
+depends-on      = local-fs

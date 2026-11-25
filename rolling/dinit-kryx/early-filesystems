@@ -1,0 +1,3 @@
+type            = scripted
+command         = /usr/libexec/dinit-kryx/early-filesystems start
+options         = starts-rwfs

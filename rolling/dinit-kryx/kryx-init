@@ -1,0 +1,119 @@
+#!/usr/bin/env bash
+# kryx-init - Inspect and switch KryX Linux init system (rc <-> dinit) safely.
+set -euo pipefail
+
+usage() {
+	cat <<'EOF'
+Usage: kryx-init <command> [args...]
+
+Commands:
+  status                 Show active PID 1 init, configured GRUB default, and enabled dinit services
+  use <dinit|rc>         Configure GRUB (/etc/default/grub) to boot with dinit or CRUX rc (SysVinit)
+  enable <service...>    Enable service(s) in /etc/dinit.d/boot.d/
+  disable <service...>   Disable service(s) from /etc/dinit.d/boot.d/
+  list                   List available and enabled /etc/dinit.d/ services
+EOF
+}
+
+active_pid1() {
+	if [[ -r /proc/1/comm ]]; then
+		cat /proc/1/comm 2>/dev/null || echo "unknown"
+	else
+		echo "unknown"
+	fi
+}
+
+cmd="${1:-status}"
+shift || true
+
+case "$cmd" in
+	-h|--help|help)
+		usage
+		;;
+	status)
+		pid1="$(active_pid1)"
+		echo "Active PID 1 : ${pid1}"
+		if [[ -f /etc/default/grub ]] && grep -q 'init=/usr/sbin/dinit' /etc/default/grub 2>/dev/null; then
+			echo "GRUB default : dinit (init=/usr/sbin/dinit)"
+		else
+			echo "GRUB default : rc (CRUX SysVinit /sbin/init)"
+		fi
+		if [[ -d /etc/dinit.d/boot.d ]]; then
+			shopt -s nullglob
+			en=(/etc/dinit.d/boot.d/*)
+			shopt -u nullglob
+			names=()
+			for e in "${en[@]}"; do names+=("$(basename "$e")"); done
+			echo "dinit boot.d : ${names[*]:-(none)}"
+		fi
+		if [[ "$pid1" == "dinit" ]] && command -v dinitctl >/dev/null 2>&1; then
+			echo ""
+			dinitctl list || true
+		fi
+		;;
+	list)
+		for f in /etc/dinit.d/*; do
+			[[ -f "$f" ]] || continue
+			name="$(basename "$f")"
+			if [[ -e "/etc/dinit.d/boot.d/${name}" ]]; then
+				printf '  [enabled]  %s\n' "$name"
+			else
+				printf '  [disabled] %s\n' "$name"
+			fi
+		done
+		;;
+	enable)
+		[[ "$(id -u)" -eq 0 ]] || { echo "kryx-init: must be run as root" >&2; exit 1; }
+		[[ $# -gt 0 ]] || { echo "usage: kryx-init enable <service...>" >&2; exit 2; }
+		mkdir -p /etc/dinit.d/boot.d
+		for svc in "$@"; do
+			if [[ ! -f "/etc/dinit.d/${svc}" ]]; then
+				echo "kryx-init: service not found: /etc/dinit.d/${svc}" >&2
+				exit 1
+			fi
+			ln -sf "../${svc}" "/etc/dinit.d/boot.d/${svc}"
+			echo "enabled ${svc}"
+		done
+		;;
+	disable)
+		[[ "$(id -u)" -eq 0 ]] || { echo "kryx-init: must be run as root" >&2; exit 1; }
+		[[ $# -gt 0 ]] || { echo "usage: kryx-init disable <service...>" >&2; exit 2; }
+		for svc in "$@"; do
+			rm -f "/etc/dinit.d/boot.d/${svc}"
+			echo "disabled ${svc}"
+		done
+		;;
+	use)
+		[[ "$(id -u)" -eq 0 ]] || { echo "kryx-init: must be run as root" >&2; exit 1; }
+		mode="${1:-}"
+		if [[ "$mode" != "dinit" && "$mode" != "rc" ]]; then
+			echo "usage: kryx-init use <dinit|rc>" >&2
+			exit 2
+		fi
+		mkdir -p /etc/default
+		[[ -f /etc/default/grub ]] || printf 'GRUB_CMDLINE_LINUX_DEFAULT=""\n' > /etc/default/grub
+		# Strip any existing init=/usr/sbin/dinit token cleanly.
+		sed -i -E 's|[[:space:]]*init=/usr/sbin/dinit||g' /etc/default/grub
+		if [[ "$mode" == "dinit" ]]; then
+			[[ -x /usr/sbin/dinit ]] || { echo "kryx-init: /usr/sbin/dinit not installed; run: kpm install -d dinit dinit-kryx" >&2; exit 1; }
+			if grep -q '^GRUB_CMDLINE_LINUX_DEFAULT=' /etc/default/grub; then
+				sed -i -E 's|^(GRUB_CMDLINE_LINUX_DEFAULT="[^"]*)"|\1 init=/usr/sbin/dinit"|; s|=" |="|' /etc/default/grub
+			else
+				echo 'GRUB_CMDLINE_LINUX_DEFAULT="init=/usr/sbin/dinit"' >> /etc/default/grub
+			fi
+			echo "Configured GRUB to boot dinit (init=/usr/sbin/dinit)."
+		else
+			echo "Configured GRUB to boot CRUX rc (SysVinit /sbin/init)."
+		fi
+		if command -v grub-mkconfig >/dev/null 2>&1 && [[ -d /boot/grub ]]; then
+			grub-mkconfig -o /boot/grub/grub.cfg
+		else
+			echo "Note: run 'grub-mkconfig -o /boot/grub/grub.cfg' to regenerate GRUB config."
+		fi
+		;;
+	*)
+		echo "kryx-init: unknown command: ${cmd}" >&2
+		usage >&2
+		exit 2
+		;;
+esac

@@ -1,0 +1,7 @@
+type       = internal
+depends-on = getty-tty1
+depends-on = getty-tty2
+depends-on = getty-tty3
+depends-on = getty-tty4
+depends-on = getty-tty5
+depends-on = getty-tty6

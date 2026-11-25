@@ -1,0 +1,7 @@
+# System D-Bus daemon with true FD readiness notification (solves dbus -> iwd race)
+type               = process
+command            = /bin/sh -c 'mkdir -p /run/dbus /var/lib/dbus; chmod 0755 /run/dbus; [ -x /usr/bin/dbus-uuidgen ] && /usr/bin/dbus-uuidgen --ensure 2>/dev/null || true; exec /usr/sbin/dbus-daemon --system --nofork --nopidfile --print-address=4'
+ready-notification = pipefd:4
+restart            = true
+smooth-recovery    = true
+depends-on         = local-fs
