@@ -3,7 +3,7 @@
 # Maintainer:  kryx-linux and contributors
 
 name=dinit
-version=0.22.1
+version=0.23.0
 release=1
 source=(https://github.com/davmac314/$name/archive/v$version/$name-$version.tar.gz)
 
