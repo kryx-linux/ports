@@ -72,7 +72,7 @@ build() {
 ### Directory Naming Rule (Critical)
 
 The directory basename **should match** `name=` inside `Pkgfile`:
-- Good: `pkg-tools/kpm/Pkgfile` with `name=kpm` (or `kernel/linux6.18/Pkgfile` when paired with `kryx-src` registry resolution).
+- Good: `kpm-tools/kpm/Pkgfile` with `name=kpm` (or `kernel/linux6.18/Pkgfile` when paired with `kryx-src` registry resolution).
 - Note: `kernel/linux6.18/Pkgfile` declares `name=kernel` so users install `kpm install kernel`. While `kpm` and `kryx-src` resolve dir-vs-name mismatches safely via the canonical registry, `kryx-src lint` warns on them because stock CRUX tools expect `basename(dir) == name`.
 
 ---

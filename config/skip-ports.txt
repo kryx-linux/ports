@@ -1,6 +1,6 @@
 # ports/config/skip-ports.txt
 # Quarantined ports whose dependencies live outside KryX's 7 active collections
-# (pkg-tools, kernel, core, opt, xorg, contrib, compat-32).
+# (kpm-tools, kernel, system, core, opt, xorg, contrib, compat-32).
 contrib/easyeffects          # missing: kirigami-addons, qqc2-desktop-style
 contrib/nextcloud-client     # missing: karchive
 contrib/winetricks           # missing: wine

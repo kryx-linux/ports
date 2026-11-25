@@ -16,7 +16,7 @@ kryx-src pkg \
   --work-root /tmp/kryx-work \
   --out-dir ./dist/packages \
   --deps --sync-index --force \
-  pkg-tools/kpm system/dinit system/dinit-kryx
+  kpm-tools/kpm system/dinit system/dinit-kryx
 
 # 4. Stage index.json + GitHub-safe upload copies + Ed25519 signature
 kryx-src stage --packages ./dist/packages --ports /usr/ports --index ./dist/index.json --upload-dir ./dist/upload
