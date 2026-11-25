@@ -18,7 +18,7 @@ You can stack multiple binary repos and multiple local ports trees in priority o
 ```ini
 [paths]
 ports_dir = /usr/ports, /srv/my-local-ports
-collections = rolling, core, opt, xorg, contrib
+collections = pkg-tools, kernel, system, core, opt, xorg, contrib, compat-32
 keys_dir = /etc/kpm/keys.d
 
 [repo.rolling]

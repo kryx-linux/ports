@@ -5,19 +5,20 @@
 ## How to Maintain KryX Ports Without Forking All of CRUX
 Don't fork 1,800+ upstream CRUX packages. Use the **overlay model**:
 
-1. Sync upstream CRUX collections (`core`, `opt`, `xorg`, `contrib`) AND your KryX `rolling` collection in `/etc/gports/sources.list`:
+1. Sync upstream CRUX collections (`core`, `opt`, `xorg`, `contrib`, `compat-32`) AND KryX's first-party collections (`pkg-tools`, `kernel`, `system`) in `/etc/ports/sources.list`:
    ```text
-   git rolling https://github.com/kryx-linux/ports.git /usr/ports/rolling-repo
-   git core    https://git.crux.nu/ports/core.git
-   git opt     https://git.crux.nu/ports/opt.git
-   git xorg    https://git.crux.nu/ports/xorg.git
-   git contrib https://git.crux.nu/ports/contrib.git
+   git kryx      https://github.com/kryx-linux/ports.git
+   git core      https://github.com/kryx-linux/core.git
+   git opt       https://github.com/kryx-linux/opt.git
+   git xorg      https://github.com/kryx-linux/xorg.git
+   git contrib   https://github.com/kryx-linux/contrib.git
+   git compat-32 https://github.com/kryx-linux/compat-32.git
    ```
-2. Put `rolling` **first** in `/etc/kpm.ini`:
+2. Put KryX's first-party collections **first** in `/etc/kpm.ini`:
    ```ini
-   collections = rolling, core, opt, xorg, contrib
+   collections = pkg-tools, kernel, system, core, opt, xorg, contrib, compat-32
    ```
-3. Any package you place in `rolling/` automatically overrides stock CRUX while all other packages come seamlessly from CRUX!
+3. Any package you place in `pkg-tools/`, `kernel/`, or `system/` automatically overrides stock CRUX while all other packages come seamlessly from CRUX!
 4. Add personal or third-party collections as drop-in files under `/etc/gports/sources.list.d/*.list` (for example using `rsync` or `httpup`) so package upgrades never touch them.
 
 ## Essential `gports` Commands

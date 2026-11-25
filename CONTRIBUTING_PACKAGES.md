@@ -125,11 +125,11 @@ Never assume user edits in `/etc` should be overwritten on upgrade; `/etc/pkgadd
 
 1. **Lint your port (checks headers, dir/name alignment, deps, cycles):**
    ```bash
-   kryx-src lint --ports /usr/ports rolling/myport
+   kryx-src lint --ports /usr/ports system/myport
    ```
 2. **Build with binary-first runtime + make dependencies:**
    ```bash
-   kpm build --deps --sync --update-footprint rolling/myport
+   kpm build --deps --sync --update-footprint system/myport
    ```
 3. **Verify clean footprint & archive contents:**
    ```bash
@@ -142,7 +142,7 @@ Never assume user edits in `/etc` should be overwritten on upgrade; `/etc/pkgadd
    ```
 5. **Run CI test via GitHub Actions:**
    - Open **Actions → Build Packages with kryx-src (Matrix) and Publish Rolling Repo**.
-   - Set `port_path` to `rolling/myport` (or multiple space-separated ports, capped by `max_ports`).
+   - Set `port_path` to `system/myport` (or multiple space-separated ports, capped by `max_ports`).
    - Enable `build_deps: true` to satisfy `# Make depends on:` from existing binaries automatically.
 
 ---

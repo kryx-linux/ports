@@ -5,10 +5,10 @@
 ## Local Maintainer Workflow
 ```bash
 # 1. Lint ports before pushing (catches dir!=name, missing deps, cycles)
-kryx-src lint --ports /usr/ports rolling
+kryx-src lint --ports /usr/ports system
 
 # 2. Preview topological wave plan for CI
-kryx-src plan --ports /usr/ports --max-ports 20 rolling
+kryx-src plan --ports /usr/ports --max-ports 20 system
 
 # 3. Build cleanly into an isolated work root
 kryx-src pkg \
@@ -16,7 +16,7 @@ kryx-src pkg \
   --work-root /tmp/kryx-work \
   --out-dir ./dist/packages \
   --deps --sync-index --force \
-  rolling/kpm rolling/gports
+  pkg-tools/kpm system/dinit system/dinit-kryx
 
 # 4. Stage index.json + GitHub-safe upload copies + Ed25519 signature
 kryx-src stage --packages ./dist/packages --ports /usr/ports --index ./dist/index.json --upload-dir ./dist/upload
