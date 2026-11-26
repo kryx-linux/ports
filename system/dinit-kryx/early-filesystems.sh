@@ -15,8 +15,6 @@ mountpoint -q /run     || mount -t tmpfs -o mode=0755,nosuid,nodev tmpfs /run
 chmod 1777 /tmp /var/tmp
 
 if [ -d /sys/firmware/efi/efivars ]; then
+	command -v modprobe >/dev/null 2>&1 && modprobe efivarfs 2>/dev/null || true
 	mountpoint -q /sys/firmware/efi/efivars || mount -t efivarfs efivarfs /sys/firmware/efi/efivars 2>/dev/null || true
 fi
-
-# Remount root read-write early so dinit & udev can persist state cleanly
-mount -o remount,rw / 2>/dev/null || true

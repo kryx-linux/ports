@@ -1,4 +1,5 @@
-type       = scripted
-command    = /usr/libexec/dinit-kryx/local-fs start
+type         = scripted
+command      = /usr/libexec/dinit-kryx/local-fs start
 stop-command = /usr/libexec/dinit-kryx/local-fs stop
-depends-on = udev-trigger
+depends-on   = udev-trigger
+options      = starts-rwfs

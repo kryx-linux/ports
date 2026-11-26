@@ -6,12 +6,17 @@ export PATH
 case "${1:-start}" in
 	start)
 		if [ -f /etc/fstab ]; then
+			# Run fsck while root is still mounted read-only, then remount rw.
 			fsck -A -T -C -a >/dev/null 2>&1 || true
+		fi
+		mount -o remount,rw / 2>/dev/null || true
+		if [ -f /etc/fstab ]; then
 			mount -a -t nosysfs,noproc,nodevtmpfs 2>/dev/null || mount -a || true
 		fi
 		swapon -a 2>/dev/null || true
 		[ -x /sbin/ldconfig ] && /sbin/ldconfig 2>/dev/null || true
-		touch /run/utmp 2>/dev/null || true
+		mkdir -p /var/run
+		touch /run/utmp /var/run/utmp 2>/dev/null || true
 		;;
 	stop)
 		sync

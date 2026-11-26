@@ -101,6 +101,11 @@ case "$cmd" in
 			else
 				echo 'GRUB_CMDLINE_LINUX_DEFAULT="init=/usr/sbin/dinit"' >> /etc/default/grub
 			fi
+			# Prune enabled optional daemons whose binaries are not installed so boot stays clean.
+			[[ ! -x /usr/sbin/dbus-daemon ]] && rm -f /etc/dinit.d/boot.d/dbus
+			[[ ! -x /usr/sbin/iwd ]]         && rm -f /etc/dinit.d/boot.d/iwd
+			[[ ! -x /sbin/dhcpcd ]]          && rm -f /etc/dinit.d/boot.d/dhcpcd
+			[[ ! -x /usr/bin/turnstiled ]]   && rm -f /etc/dinit.d/boot.d/turnstiled
 			echo "Configured GRUB to boot dinit (init=/usr/sbin/dinit)."
 		else
 			echo "Configured GRUB to boot CRUX rc (SysVinit /sbin/init)."
