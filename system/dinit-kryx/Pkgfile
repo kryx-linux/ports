@@ -53,6 +53,7 @@ type            = process
 command         = /sbin/agetty --noclear 38400 tty${n} linux
 restart         = true
 depends-on      = local-fs
+waits-for       = hostname
 termsignal      = HUP
 smooth-recovery = true
 inittab-id      = ${n}

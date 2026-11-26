@@ -38,4 +38,15 @@ build() {
 		mv "$PKG/usr/lib/security/pam_turnstile.so" "$PKG/lib/security/pam_turnstile.so"
 		rmdir -p "$PKG/usr/lib/security" 2>/dev/null || true
 	fi
+
+	# Ensure /usr/bin/turnstiled always exists (matches dinit-kryx/turnstiled) even if Meson installs under libexec/sbin.
+	if [ ! -e "$PKG/usr/bin/turnstiled" ]; then
+		for cand in "$PKG/usr/sbin/turnstiled" "$PKG/usr/lib/turnstiled" "$PKG/usr/libexec/turnstiled"; do
+			if [ -x "$cand" ]; then
+				install -d "$PKG/usr/bin"
+				ln -sf "${cand#"$PKG"}" "$PKG/usr/bin/turnstiled"
+				break
+			fi
+		done
+	fi
 }
